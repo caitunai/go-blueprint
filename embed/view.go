@@ -1,0 +1,62 @@
+package embed
+
+import (
+	"embed"
+	"encoding/json"
+	"io/fs"
+)
+
+//go:embed views ui static
+var FS embed.FS
+var UI, _ = fs.Sub(FS, "ui")
+var Assets, _ = fs.Sub(UI, "assets")
+var Static, _ = fs.Sub(FS, "static")
+
+type ManifestNode struct {
+	CSS     []string `json:"css"`
+	File    string   `json:"file"`
+	Imports []string `json:"imports"`
+	IsEntry bool     `json:"isEntry"`
+	Src     string   `json:"src"`
+}
+
+type Manifest map[string]*ManifestNode
+
+func ParseManifest() Manifest {
+	file, err := FS.ReadFile("ui/manifest.json")
+	if err != nil {
+		return nil
+	}
+	node := make(Manifest)
+	err = json.Unmarshal(file, &node)
+	if err != nil {
+		return nil
+	}
+	return node
+}
+
+func (m Manifest) GetCssFiles(entry string) []string {
+	node, ok := m[entry]
+	if !ok {
+		return []string{}
+	}
+	return node.CSS
+}
+
+func (m Manifest) GetJsFiles(entry string) []string {
+	node, ok := m[entry]
+	if !ok {
+		return []string{}
+	}
+	files := make([]string, 0)
+	files = append(files, node.File)
+	if len(node.Imports) > 0 {
+		for _, v := range node.Imports {
+			inode, ok := m[v]
+			if ok {
+				files = append(files, inode.File)
+			}
+		}
+	}
+	return files
+}

@@ -76,9 +76,9 @@ linters-settings:
         allow:
           - $all
           - $gostd
+          - github.com/caitunai/go-blueprint
           - github.com/rs/zerolog
           - github.com/spf13/viper
-          - github.com/caitunai/go-blueprint
           - github.com/gin-gonic/gin
           - github.com/redis/go-redis
           - github.com/go-redis/cache

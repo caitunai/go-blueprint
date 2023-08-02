@@ -16,11 +16,11 @@ var (
 )
 
 type ManifestNode struct {
-	CSS     []string `json:"css"`
+	Src     string   `json:"src"`
 	File    string   `json:"file"`
+	CSS     []string `json:"css"`
 	Imports []string `json:"imports"`
 	IsEntry bool     `json:"isEntry"`
-	Src     string   `json:"src"`
 }
 
 type Manifest map[string]*ManifestNode
@@ -55,8 +55,8 @@ func (m Manifest) GetJsFiles(entry string) []string {
 	files = append(files, node.File)
 	if len(node.Imports) > 0 {
 		for _, v := range node.Imports {
-			inode, ok := m[v]
-			if ok {
+			inode, exist := m[v]
+			if exist {
 				files = append(files, inode.File)
 			}
 		}

@@ -3,7 +3,7 @@ The project template of Golang.
 
 ## How to use
 ```shell
-gonew github.com/caitunai/go-blueprint@v1.3.0 github.com/yourname/project
+gonew github.com/caitunai/go-blueprint@v1.4.0 github.com/yourname/project
 ```
 
 ## Install gonew

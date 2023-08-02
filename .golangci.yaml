@@ -12,6 +12,7 @@ output:
 issues:
   exclude:
     - ".*getCssJsFiles` is unused"
+    - "shadow: declaration of \"err\" shadows declaration at"
 
 linters:
   disable-all: true
@@ -49,6 +50,19 @@ linters:
     - zerologlint
 
 linters-settings:
+  govet:
+    # Report about shadowed variables.
+    # Default: false
+    check-shadowing: true
+    # Settings per analyzer.
+    settings:
+      shadow:
+        # Whether to be strict about shadowing; can be noisy.
+        # Default: false
+        strict: true
+    # Disable all analyzers.
+    # Default: false
+    enable-all: true
   depguard:
     # Rules to apply.
     #

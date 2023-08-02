@@ -12,10 +12,10 @@ import (
 )
 
 type Logger struct {
-	SlowThreshold         time.Duration
 	SourceField           string
-	SkipErrRecordNotFound bool
 	LogLevel              logger.LogLevel
+	SlowThreshold         time.Duration
+	SkipErrRecordNotFound bool
 }
 
 func NewLogger() *Logger {

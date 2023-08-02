@@ -9,7 +9,7 @@ import (
 
 func HomePage(c *base.Context) {
 	user := c.LoginUser()
-	if user != nil {
+	if user == nil {
 		c.Forbidden("you are not login", gin.H{})
 	} else {
 		c.Success(gin.H{

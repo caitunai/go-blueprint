@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	ErrCookieUrlParse = errors.New("parse url from configuration failed")
+	ErrCookieURLParse = errors.New("parse url from configuration failed")
 	ErrCookieDecode   = errors.New("decode cookie failed")
 )
 
@@ -99,7 +99,7 @@ func (c *Context) NotFound(message string, data gin.H) {
 func (c *Context) SendCookie(key, value string, second int) error {
 	link, err := url.Parse(viper.GetString("url"))
 	if err != nil {
-		return errors.Join(err, ErrCookieUrlParse)
+		return errors.Join(err, ErrCookieURLParse)
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(

@@ -47,3 +47,47 @@ linters:
     - whitespace
     - wrapcheck
     - zerologlint
+
+linters-settings:
+  depguard:
+    # Rules to apply.
+    #
+    # Variables:
+    # - File Variables
+    #   you can still use and exclamation mark ! in front of a variable to say not to use it.
+    #   Example !$test will match any file that is not a go test file.
+    #
+    #   `$all` - matches all go files
+    #   `$test` - matches all go test files
+    #
+    # - Package Variables
+    #
+    #  `$gostd` - matches all of go's standard library (Pulled from `GOROOT`)
+    #
+    # Default: Only allow $gostd in all files.
+    rules:
+      # Name of a rule.
+      main:
+        # List of file globs that will match this list of settings to compare against.
+        # Default: $all
+        files:
+          - $all
+        # List of allowed packages.
+        allow:
+          - $all
+          - $gostd
+          - github.com/rs/zerolog
+          - github.com/spf13/viper
+          - github.com/caitunai/go-blueprint
+          - github.com/gin-gonic/gin
+          - github.com/redis/go-redis
+          - github.com/go-redis/cache
+          - github.com/spf13/cobra
+          - github.com/gin-contrib
+          - github.com/golang-jwt/jwt
+        # Packages that are not allowed where the value is a suggestion.
+        deny:
+          - pkg: "reflect"
+            desc: not allowed
+          - pkg: "github.com/pkg/errors"
+            desc: Should be replaced by standard lib errors package

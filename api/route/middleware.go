@@ -85,8 +85,6 @@ func AttemptAuth() base.HandlerFunc {
 					} else if u != nil {
 						c.SetUser(u)
 						uid = uint64(u.ID)
-					} else {
-						uid = 0
 					}
 				}
 			}

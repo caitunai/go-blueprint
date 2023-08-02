@@ -3,20 +3,19 @@ package route
 import (
 	"crypto/rsa"
 	"errors"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
-	"os"
-	"strconv"
-	"strings"
 )
 
-var (
-	publicKey *rsa.PublicKey
-)
+var publicKey *rsa.PublicKey
 
 func InitMiddleware() {
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
@@ -58,7 +57,7 @@ func AttemptAuth() base.HandlerFunc {
 			bearerToken = strings.TrimPrefix(bearerToken, "Bearer")
 			bearerToken = strings.TrimSpace(bearerToken)
 			if bearerToken != "" {
-				var accountId uint64
+				var accountID uint64
 				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (interface{}, error) {
 					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 						return nil, errors.New("sign method error")
@@ -70,16 +69,16 @@ func AttemptAuth() base.HandlerFunc {
 				})
 				if err != nil {
 					log.Error().Err(err).Msgf("parse token error: %s", bearerToken)
-					accountId = 0
+					accountID = 0
 				} else {
 					sub, err := token.Claims.GetSubject()
 					if err != nil {
 						log.Error().Err(err).Msg("get token id error")
 					}
-					accountId, _ = strconv.ParseUint(sub, 10, 64)
+					accountID, _ = strconv.ParseUint(sub, 10, 64)
 				}
-				if accountId > 0 {
-					u, err := db.RegisterUser(c.Request.Context(), uint(accountId))
+				if accountID > 0 {
+					u, err := db.RegisterUser(c.Request.Context(), uint(accountID))
 					if err != nil {
 						uid = 0
 					} else if u != nil {

@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

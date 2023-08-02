@@ -8,9 +8,7 @@ import (
 	"strings"
 )
 
-var (
-	stripTagRegx = regexp.MustCompile(`<(.|\n)*?>`)
-)
+var stripTagRegx = regexp.MustCompile(`<(.|\n)*?>`)
 
 func StripTags(content string) string {
 	return stripTagRegx.ReplaceAllString(content, "")
@@ -63,7 +61,7 @@ func SubString(s string, start, length int) string {
 }
 
 func SplitByWidth(str string, size int) []string {
-	var chars = []rune(str)
+	chars := []rune(str)
 	strLength := len(chars)
 	var splited []string
 	var stop int

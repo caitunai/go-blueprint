@@ -1,8 +1,9 @@
 package base
 
 import (
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Router struct {
@@ -19,46 +20,57 @@ func NewRouter(e *gin.Engine) *Router {
 		RouterGroup: &e.RouterGroup,
 	}
 }
+
 func (r *Router) GET(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodGet, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) POST(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodPost, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) PUT(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodPut, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) PATCH(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodPatch, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) HEAD(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodHead, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) OPTIONS(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodOptions, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) DELETE(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodDelete, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) CONNECT(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodConnect, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) TRACE(relativePath string, handlers ...HandlerFunc) *Router {
 	r.wrapRoute(http.MethodTrace, relativePath, handlers...)
 	return r
 }
+
 func (r *Router) Use(handlers ...HandlerFunc) *Router {
 	r.wrapRoute("use", "", handlers...)
 	return r
 }
+
 func (r *Router) Group(relativePath string, handlers ...HandlerFunc) *Router {
 	g := r.wrapRoute("group", relativePath, handlers...).(*gin.RouterGroup)
 	return &Router{

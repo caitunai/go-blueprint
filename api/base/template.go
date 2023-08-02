@@ -2,13 +2,14 @@ package base
 
 import (
 	"errors"
-	"github.com/caitunai/go-blueprint/embed"
-	"github.com/gin-gonic/gin/render"
-	"github.com/rs/zerolog/log"
 	"html/template"
 	"io/fs"
 	"path/filepath"
 	"strings"
+
+	"github.com/caitunai/go-blueprint/embed"
+	"github.com/gin-gonic/gin/render"
+	"github.com/rs/zerolog/log"
 )
 
 type Renderer interface {

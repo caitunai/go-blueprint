@@ -3,6 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/route"
 	"github.com/gin-contrib/cors"
@@ -11,13 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 )
 
 type Server struct {
@@ -37,19 +38,19 @@ func (s *Server) Start(ctx context.Context) {
 	r.Use(requestid.New())
 	r.Use(logger.SetLogger(logger.WithLogger(func(c *gin.Context, l zerolog.Logger) zerolog.Logger {
 		tml := log.Logger.With()
-		traceId := c.GetHeader("x-trace-id")
-		if traceId != "" {
-			tml = tml.Str("traceId", traceId)
+		traceID := c.GetHeader("x-trace-id")
+		if traceID != "" {
+			tml = tml.Str("traceID", traceID)
 		}
-		spanId := c.GetHeader("x-span-id")
-		if spanId != "" {
-			tml = tml.Str("spanId", spanId)
+		spanID := c.GetHeader("x-span-id")
+		if spanID != "" {
+			tml = tml.Str("spanID", spanID)
 		}
-		logId := c.GetHeader("x-log-id")
-		if logId != "" {
-			tml = tml.Str("logId", logId)
+		logID := c.GetHeader("x-log-id")
+		if logID != "" {
+			tml = tml.Str("logID", logID)
 		}
-		tml = tml.Str("requestId", requestid.Get(c))
+		tml = tml.Str("requestID", requestid.Get(c))
 		tmp := tml.Logger()
 		c.Request = c.Request.WithContext(tmp.WithContext(c.Request.Context()))
 		return tmp.With().Str("namespace", "ginRequest").Logger()
@@ -104,7 +105,8 @@ func (s *Server) Start(ctx context.Context) {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Server forced to shutdown:")
+		log.Error().Err(err).Msg("Server forced to shutdown:")
+		return
 	}
 
 	log.Info().Msg("Server exiting")

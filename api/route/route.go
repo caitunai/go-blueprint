@@ -1,10 +1,11 @@
 package route
 
 import (
+	"net/http"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/handler"
 	"github.com/caitunai/go-blueprint/embed"
-	"net/http"
 )
 
 func InitRoute(r *base.Router) {

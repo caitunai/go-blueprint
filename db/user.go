@@ -3,12 +3,13 @@ package db
 import (
 	"context"
 	"errors"
+
 	"gorm.io/gorm"
 )
 
 type User struct {
 	gorm.Model
-	AccountId uint `gorm:"index" json:"account_id"`
+	AccountID uint `gorm:"index" json:"account_id"`
 }
 
 func (u *User) Save(ctx context.Context) error {
@@ -21,13 +22,13 @@ func GetUser(ctx context.Context, uid uint) *User {
 	return u
 }
 
-func RegisterUser(ctx context.Context, accountId uint) (*User, error) {
+func RegisterUser(ctx context.Context, accountID uint) (*User, error) {
 	u := &User{}
-	err := DB().WithContext(ctx).Where("account_id = ?", accountId).First(u).Error
+	err := DB().WithContext(ctx).Where("account_id = ?", accountID).First(u).Error
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	u.AccountId = accountId
+	u.AccountID = accountID
 	err = u.Save(ctx)
 	if err != nil {
 		return nil, err

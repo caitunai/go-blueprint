@@ -3,6 +3,7 @@ package db
 
 import (
 	"fmt"
+
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"

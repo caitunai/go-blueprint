@@ -2,16 +2,17 @@ package base
 
 import (
 	"errors"
-	"github.com/caitunai/go-blueprint/db"
-	"github.com/caitunai/go-blueprint/embed"
-	"github.com/caitunai/go-blueprint/util"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/util"
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -25,12 +26,12 @@ type Context struct {
 	cmx  sync.RWMutex
 }
 
-func (c *Context) getCssJsFiles(entry string) (css, js []string) {
+func (c *Context) getCSSJsFiles(entry string) (css, js []string) {
 	if viper.GetString("mode") != "release" {
 		return
 	}
 	manifest := embed.ParseManifest()
-	css = manifest.GetCssFiles(entry)
+	css = manifest.GetCSSFiles(entry)
 	js = manifest.GetJsFiles(entry)
 	prefix := viper.GetString("url")
 	for i, v := range css {
@@ -115,7 +116,6 @@ func (c *Context) SendCookie(key, value string, second int) error {
 
 func (c *Context) DecodeCookie(key string) (string, error) {
 	cookie, err := c.Cookie(key)
-
 	if err != nil {
 		return "", errors.Join(err, ErrCookieDecode)
 	}
@@ -156,7 +156,7 @@ func (c *Context) IsWechatMiniProgram() bool {
 	return strings.Contains(c.GetHeader("referer"), "https://servicewechat.com")
 }
 
-func (c *Context) GetWechatAppId() string {
+func (c *Context) GetWechatAppID() string {
 	refererList := strings.Split(c.GetHeader("referer"), "/")
 	appid := ""
 	if len(refererList) > 3 {

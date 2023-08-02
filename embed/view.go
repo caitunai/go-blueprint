@@ -8,9 +8,12 @@ import (
 
 //go:embed views ui static
 var FS embed.FS
-var UI, _ = fs.Sub(FS, "ui")
-var Assets, _ = fs.Sub(UI, "assets")
-var Static, _ = fs.Sub(FS, "static")
+
+var (
+	UI, _     = fs.Sub(FS, "ui")
+	Assets, _ = fs.Sub(UI, "assets")
+	Static, _ = fs.Sub(FS, "static")
+)
 
 type ManifestNode struct {
 	CSS     []string `json:"css"`
@@ -35,7 +38,7 @@ func ParseManifest() Manifest {
 	return node
 }
 
-func (m Manifest) GetCssFiles(entry string) []string {
+func (m Manifest) GetCSSFiles(entry string) []string {
 	node, ok := m[entry]
 	if !ok {
 		return []string{}

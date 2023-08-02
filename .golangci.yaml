@@ -1,0 +1,14 @@
+run:
+  concurrency: 1
+  timeout: 1m
+  issues-exit-code: 1
+  tests: true
+  skip-files: []
+
+output:
+  uniq-by-line: true
+  print-linter-name: true
+
+issues:
+  exclude:
+    - ".*getCssJsFiles` is unused"

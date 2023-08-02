@@ -12,3 +12,38 @@ output:
 issues:
   exclude:
     - ".*getCssJsFiles` is unused"
+
+linters:
+  disable-all: true
+  enable:
+    - bidichk
+    - depguard
+    - dupl
+    - errcheck
+    - gocritic
+    - gofmt
+    - gofumpt
+    - gosimple
+    - govet
+    - ineffassign
+    - nakedret
+    - nolintlint
+    - revive
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unused
+    - wastedassign
+    - errname
+    - bodyclose
+    - contextcheck
+    - containedctx
+    - errchkjson
+    - errorlint
+    - forbidigo
+    - goconst
+    - makezero
+    - whitespace
+    - wrapcheck
+    - zerologlint

@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"errors"
-	"github.com/caitun/go-blueprint/api/base"
-	"github.com/caitun/go-blueprint/api/route"
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/api/route"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/logger"
 	"github.com/gin-contrib/requestid"

@@ -1,4 +1,4 @@
-module github.com/caitun/go-blueprint
+module github.com/caitunai/go-blueprint
 
 go 1.20
 

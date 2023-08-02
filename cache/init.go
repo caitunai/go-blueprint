@@ -3,7 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
-	"github.com/caitun/go-blueprint/redis"
+	"github.com/caitunai/go-blueprint/redis"
 	"github.com/go-redis/cache/v9"
 	"time"
 )

@@ -3,8 +3,8 @@ package route
 import (
 	"crypto/rsa"
 	"errors"
-	"github.com/caitun/go-blueprint/api/base"
-	"github.com/caitun/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/db"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"

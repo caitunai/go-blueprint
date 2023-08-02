@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/caitun/go-blueprint/api/server"
-	"github.com/caitun/go-blueprint/cache"
-	"github.com/caitun/go-blueprint/redis"
+	"github.com/caitunai/go-blueprint/api/server"
+	"github.com/caitunai/go-blueprint/cache"
+	"github.com/caitunai/go-blueprint/redis"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

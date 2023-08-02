@@ -1,7 +1,7 @@
 package base
 
 import (
-	"github.com/caitun/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/embed"
 	"github.com/gin-gonic/gin/render"
 	"github.com/rs/zerolog/log"
 	"html/template"

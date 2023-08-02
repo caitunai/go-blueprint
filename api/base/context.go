@@ -1,9 +1,9 @@
 package base
 
 import (
-	"github.com/caitun/go-blueprint/db"
-	"github.com/caitun/go-blueprint/embed"
-	"github.com/caitun/go-blueprint/util"
+	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/util"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 	"net/http"

@@ -1,9 +1,9 @@
 package route
 
 import (
-	"github.com/caitun/go-blueprint/api/base"
-	"github.com/caitun/go-blueprint/api/handler"
-	"github.com/caitun/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/api/handler"
+	"github.com/caitunai/go-blueprint/embed"
 	"net/http"
 )
 

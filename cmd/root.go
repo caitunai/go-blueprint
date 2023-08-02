@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/caitun/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/db"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"

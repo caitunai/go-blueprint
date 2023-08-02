@@ -2,7 +2,7 @@ package handler
 
 import (
 	"fmt"
-	"github.com/caitun/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/gin-gonic/gin"
 )
 

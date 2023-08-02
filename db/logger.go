@@ -36,15 +36,15 @@ func (l *Logger) LogMode(lvl logger.LogLevel) logger.Interface {
 }
 
 func (l *Logger) Info(ctx context.Context, s string, args ...interface{}) {
-	log.Ctx(ctx).Info().Msgf(s, args)
+	log.Ctx(ctx).Info().Msgf(s, args...)
 }
 
 func (l *Logger) Warn(ctx context.Context, s string, args ...interface{}) {
-	log.Ctx(ctx).Warn().Msgf(s, args)
+	log.Ctx(ctx).Warn().Msgf(s, args...)
 }
 
 func (l *Logger) Error(ctx context.Context, s string, args ...interface{}) {
-	log.Ctx(ctx).Error().Msgf(s, args)
+	log.Ctx(ctx).Error().Msgf(s, args...)
 }
 
 func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {

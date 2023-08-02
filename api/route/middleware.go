@@ -75,7 +75,6 @@ func AttemptAuth() base.HandlerFunc {
 					sub, err := token.Claims.GetSubject()
 					if err != nil {
 						log.Error().Err(err).Msg("get token id error")
-						accountId = 0
 					}
 					accountId, _ = strconv.ParseUint(sub, 10, 64)
 				}

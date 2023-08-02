@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	cli             *cache.Cache
-	ErrorConnection = errors.New("error connection")
+	cli          *cache.Cache
+	ErrPutString = errors.New("error to put string to redis")
+	ErrGetString = errors.New("error to get string from redis")
 )
 
 func InitCache() {
@@ -30,7 +31,7 @@ func PutString(ctx context.Context, key, value string, ttl time.Duration) error 
 		Value: value,
 		TTL:   ttl,
 	}); err != nil {
-		return err
+		return errors.Join(err, ErrPutString)
 	}
 	return nil
 }
@@ -41,5 +42,5 @@ func GetString(ctx context.Context, key string) (string, error) {
 	if err == nil {
 		return wanted, nil
 	}
-	return wanted, err
+	return wanted, errors.Join(err, ErrGetString)
 }

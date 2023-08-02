@@ -1,6 +1,7 @@
 package base
 
 import (
+	"errors"
 	"github.com/caitunai/go-blueprint/embed"
 	"github.com/gin-gonic/gin/render"
 	"github.com/rs/zerolog/log"
@@ -19,8 +20,10 @@ type Renderer interface {
 type Render map[string]*template.Template
 
 var (
-	_ render.HTMLRender = Render{}
-	_ Renderer          = Render{}
+	_               render.HTMLRender = Render{}
+	_               Renderer          = Render{}
+	ErrReadLayout                     = errors.New("error to read layout file")
+	ErrPageTemplate                   = errors.New("error to read page template")
 )
 
 // NewRender instance
@@ -117,6 +120,8 @@ func (r Render) readLayoutFile(file string) ([]byte, error) {
 		suffix := []byte("{{ end }}")
 		content = append(prefix, content...)
 		content = append(content, suffix...)
+	} else {
+		err = errors.Join(err, ErrReadLayout)
 	}
 	return content, err
 }
@@ -128,6 +133,8 @@ func (r Render) readPageTemplateFile(file, pageName string) ([]byte, error) {
 		tmpName := r.getTemplateName(tplName)
 		prefix := []byte("{{ define \"" + pageName + "\"}}{{ template \"" + tmpName + "\" .}}{{ end }}")
 		content = append(prefix, content...)
+	} else {
+		err = errors.Join(err, ErrPageTemplate)
 	}
 	return content, err
 }

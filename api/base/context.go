@@ -1,6 +1,7 @@
 package base
 
 import (
+	"errors"
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/embed"
 	"github.com/caitunai/go-blueprint/util"
@@ -11,6 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+)
+
+var (
+	ErrCookieUrlParse = errors.New("parse url from configuration failed")
+	ErrCookieDecode   = errors.New("decode cookie failed")
 )
 
 type Context struct {
@@ -92,7 +98,7 @@ func (c *Context) NotFound(message string, data gin.H) {
 func (c *Context) SendCookie(key, value string, second int) error {
 	link, err := url.Parse(viper.GetString("url"))
 	if err != nil {
-		return err
+		return errors.Join(err, ErrCookieUrlParse)
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
@@ -111,7 +117,7 @@ func (c *Context) DecodeCookie(key string) (string, error) {
 	cookie, err := c.Cookie(key)
 
 	if err != nil {
-		return "", err
+		return "", errors.Join(err, ErrCookieDecode)
 	}
 
 	if cookie != "" {

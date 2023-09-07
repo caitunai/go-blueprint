@@ -55,10 +55,35 @@ func (c *Context) Success(data gin.H) {
 	})
 }
 
+// Error response with http status 500
+//
+// code the error code
+//
+// message the message of this error
+//
+// data the data map for this response
 func (c *Context) Error(code int, message string, data gin.H) {
 	c.Header("x-error-code", strconv.Itoa(code))
 	c.JSON(http.StatusInternalServerError, gin.H{
 		"status":  code,
+		"message": message,
+		"data":    data,
+	})
+}
+
+// ErrorMessage response with http status 500
+//
+// message the error message to response
+func (c *Context) ErrorMessage(message string) {
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"status":  http.StatusInternalServerError,
+		"message": message,
+	})
+}
+
+func (c *Context) Unauthorized(message string, data gin.H) {
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"status":  http.StatusUnauthorized,
 		"message": message,
 		"data":    data,
 	})
@@ -91,6 +116,14 @@ func (c *Context) ErrorForm(message string, data gin.H) {
 func (c *Context) NotFound(message string, data gin.H) {
 	c.JSON(http.StatusNotFound, gin.H{
 		"status":  http.StatusNotFound,
+		"message": message,
+		"data":    data,
+	})
+}
+
+func (c *Context) PayRequired(message string, data gin.H) {
+	c.JSON(http.StatusPaymentRequired, gin.H{
+		"status":  http.StatusPaymentRequired,
 		"message": message,
 		"data":    data,
 	})

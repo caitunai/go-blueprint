@@ -25,7 +25,7 @@ go install github.com/cosmtrek/air@latest
 ```
 create the configuration and update the content
 ```shell
-mv .app.toml.example .app.toml
+cp .app.toml.example .app.toml
 vim .app.toml
 ```
 then run project created by this template

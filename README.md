@@ -51,4 +51,9 @@ git add .
 git commit -m "commit_message"
 ```
 
+## Build to release
+```shell
+GOOS=linux GOARCH=amd64 go build
+```
+
 **Thanks**

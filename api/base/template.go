@@ -108,7 +108,7 @@ func (r Render) getFileName(fileName string) string {
 func (r Render) getTemplateName(fileName string) string {
 	name := "app"
 	if strings.Contains(fileName, ".") {
-		name = filepath.Ext(fileName)
+		name = strings.Trim(filepath.Ext(fileName), ".")
 	}
 	return name
 }

@@ -89,6 +89,7 @@ func AttemptAuth() base.HandlerFunc {
 			}
 		}
 		if uid == 0 && !c.IsWechatMiniProgram() {
+			// is WeChat H5 but not WeChat program
 			ag := strings.ToLower(c.GetHeader("user-agent"))
 			isWechat := strings.Contains(ag, "micromessenger")
 			isCallback := strings.Contains(c.Request.URL.Path, "oauth/path/to/callback")
@@ -120,7 +121,7 @@ func AuthorizedAllowSpider() base.HandlerFunc {
 }
 
 func login(c *base.Context) {
-	c.Forbidden("you should login", gin.H{
+	c.Unauthorized("you should login", gin.H{
 		"result": "you are not implement the login function",
 	})
 }

@@ -82,6 +82,10 @@ func (c *Context) ErrorMessage(message string) {
 }
 
 func (c *Context) Unauthorized(message string, data gin.H) {
+	c.Header(
+		"WWW-Authenticate",
+		"Bearer error=\"invalid_token\", error_description=\"The token is invalid, request with a new token\"",
+	)
 	c.JSON(http.StatusUnauthorized, gin.H{
 		"status":  http.StatusUnauthorized,
 		"message": message,

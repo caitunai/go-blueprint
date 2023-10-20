@@ -58,7 +58,7 @@ func AttemptAuth() base.HandlerFunc {
 			bearerToken = strings.TrimSpace(bearerToken)
 			if bearerToken != "" {
 				var accountID uint64
-				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (interface{}, error) {
+				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
 					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 						return nil, errors.New("sign method error")
 					}

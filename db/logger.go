@@ -35,15 +35,15 @@ func (l *Logger) LogMode(lvl logger.LogLevel) logger.Interface {
 	}
 }
 
-func (l *Logger) Info(ctx context.Context, s string, args ...interface{}) {
+func (l *Logger) Info(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Info().Msgf(s, args...)
 }
 
-func (l *Logger) Warn(ctx context.Context, s string, args ...interface{}) {
+func (l *Logger) Warn(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Warn().Msgf(s, args...)
 }
 
-func (l *Logger) Error(ctx context.Context, s string, args ...interface{}) {
+func (l *Logger) Error(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Error().Msgf(s, args...)
 }
 
@@ -53,7 +53,7 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, 
 	}
 	elapsed := time.Since(begin)
 	sql, _ := fc()
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"namespace": "gorm",
 		"sql":       sql,
 		"duration":  elapsed,

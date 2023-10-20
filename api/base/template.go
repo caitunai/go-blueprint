@@ -35,7 +35,7 @@ func NewRender() Render {
 }
 
 // Instance supply render string
-func (r Render) Instance(name string, data interface{}) render.Render {
+func (r Render) Instance(name string, data any) render.Render {
 	return render.HTML{
 		Template: r[name],
 		Name:     name,

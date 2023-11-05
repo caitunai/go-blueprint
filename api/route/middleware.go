@@ -15,7 +15,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-var publicKey *rsa.PublicKey
+var (
+	publicKey         *rsa.PublicKey
+	oauthCallbackPath = "oauth/path/to/callback"
+)
 
 func InitMiddleware() {
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
@@ -28,10 +31,6 @@ func InitMiddleware() {
 		log.Error().Err(err).Msg("parse oauth public key failed")
 		return
 	}
-}
-
-func Authorized() base.HandlerFunc {
-	return authorized
 }
 
 func authorized(c *base.Context) {
@@ -92,7 +91,7 @@ func AttemptAuth() base.HandlerFunc {
 			// is WeChat H5 but not WeChat program
 			ag := strings.ToLower(c.GetHeader("user-agent"))
 			isWechat := strings.Contains(ag, "micromessenger")
-			isCallback := strings.Contains(c.Request.URL.Path, "oauth/path/to/callback")
+			isCallback := strings.Contains(c.Request.URL.Path, oauthCallbackPath)
 			if isWechat && !isCallback {
 				login(c)
 				c.Abort()

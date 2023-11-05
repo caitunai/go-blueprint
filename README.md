@@ -39,10 +39,16 @@ lint the code
 golangci-lint run
 ```
 
-If has some issues, try auto fix
+If it has some issues, try auto fix
 
 ```shell
 golangci-lint run --fix
+```
+
+If it has issues about struct alignment, try this command to fix
+
+```shell
+fieldalignment -fix ./path/to/package
 ```
 
 After code style fixed, you can commit the code

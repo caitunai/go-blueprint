@@ -3,7 +3,7 @@ module github.com/caitunai/go-blueprint
 go 1.21.0
 
 require (
-	github.com/gin-contrib/cors v1.4.0
+	github.com/gin-contrib/cors v1.5.0
 	github.com/gin-contrib/logger v0.2.6
 	github.com/gin-contrib/requestid v0.0.6
 	github.com/gin-gonic/gin v1.9.1

@@ -22,6 +22,12 @@ password=""
 port="6379"
 db=0
 
+[queue]
+prefix="test"
+topics=["default"]
+consumer="default"
+consumer_group="default"
+
 [oauth]
 key="oauth_app_id_or_key"
 secret="oauth_app_secret"

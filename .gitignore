@@ -400,3 +400,4 @@ stats.html
 !/embed/*/*.html
 !/embed/*/*.txt
 !.gitkeep
+go-blueprint

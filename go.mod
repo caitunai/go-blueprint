@@ -14,7 +14,7 @@ require (
 	github.com/redis/go-redis/v9 v9.3.0
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.8.0
-	github.com/spf13/viper v1.18.1
+	github.com/spf13/viper v1.18.2
 	gorm.io/driver/mysql v1.5.2
 	gorm.io/gorm v1.25.5
 )

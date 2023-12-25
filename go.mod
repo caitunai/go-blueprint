@@ -11,7 +11,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-redis/cache/v9 v9.0.0
 	github.com/golang-jwt/jwt/v5 v5.2.0
-	github.com/redis/go-redis/v9 v9.3.0
+	github.com/redis/go-redis/v9 v9.3.1
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2

@@ -36,7 +36,7 @@ func (s *Server) Start(ctx context.Context) {
 	}
 	r := gin.New()
 	r.Use(requestid.New())
-	r.Use(logger.SetLogger(logger.WithLogger(func(c *gin.Context, l zerolog.Logger) zerolog.Logger {
+	r.Use(logger.SetLogger(logger.WithLogger(func(c *gin.Context, _ zerolog.Logger) zerolog.Logger {
 		tml := log.Logger.With()
 		traceID := c.GetHeader("x-trace-id")
 		if traceID != "" {

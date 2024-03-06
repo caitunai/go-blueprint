@@ -14,7 +14,7 @@ var queueCmd = &cobra.Command{
 	Use:   "queue",
 	Short: "A command of queue listener to process jobs",
 	Long:  "Start this command to process jobs in the queues.",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		err := queue.Init()
 		if err != nil {
 			log.Error().Err(err).Msg("init queue publisher failed with error")

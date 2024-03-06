@@ -15,7 +15,7 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Command to start api server",
 	Long:  "Start the server, you should set the config file, named: .app.toml",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		redis.Init()
 		cache.InitCache()
 		err := queue.Init()

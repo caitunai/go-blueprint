@@ -3,7 +3,7 @@ The project template of Golang.
 
 ## How to use
 ```shell
-gonew github.com/caitunai/go-blueprint@v1.6.0 github.com/yourname/project
+gonew github.com/caitunai/go-blueprint@v1.6.1 github.com/yourname/project
 ```
 
 ## Install gonew
@@ -13,9 +13,9 @@ go install golang.org/x/tools/cmd/gonew@latest
 
 ## ⚠️ Update the hardcode
 > ⚠️ You need edit the `.golangci.yaml` file for `depguard` settings.
-> 
+>
 > ⚠️ Do not forget to replace the go module name in this `.golangci.yaml`:
-> 
+>
 > Replace [github.com/caitunai/go-blueprint](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml#L79) to `github.com/yourname/project`.
 
 ## Develop and Run
@@ -49,6 +49,11 @@ If it has issues about struct alignment, try this command to fix
 
 ```shell
 fieldalignment -fix ./path/to/package
+```
+
+If the `fieldalignment` command not found, you can install it with this command:
+```shell
+go install golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment@latest
 ```
 
 After code style fixed, you can commit the code

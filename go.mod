@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	github.com/ThreeDotsLabs/watermill v1.3.5
 	github.com/ThreeDotsLabs/watermill-redisstream v1.2.2
-	github.com/gin-contrib/cors v1.7.0
+	github.com/gin-contrib/cors v1.7.1
 	github.com/gin-contrib/logger v1.1.1
 	github.com/gin-contrib/requestid v1.0.0
 	github.com/gin-gonic/gin v1.9.1

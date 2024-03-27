@@ -22,10 +22,14 @@ func Conn() *gorm.DB {
 	dbname := viper.GetString("db.database")
 	host := viper.GetString("db.host")
 	port := viper.GetString("db.port")
+	tls := viper.GetBool("db.tls")
 	if user == "" || pass == "" || dbname == "" || host == "" || port == "" {
 		log.Fatal().Msg("mysql db config should not empty")
 	}
 	dsn := "%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC"
+	if tls {
+		dsn += "&tls=true"
+	}
 	dsn = fmt.Sprintf(dsn, user, pass, host, port, dbname)
 	var err error
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{

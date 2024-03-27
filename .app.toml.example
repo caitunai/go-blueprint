@@ -15,6 +15,7 @@ password="password"
 database="db_name"
 host="localhost"
 port="3306"
+tls=false
 
 [redis]
 host="127.0.0.1"

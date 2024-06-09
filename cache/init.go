@@ -26,12 +26,7 @@ func GetClient() *cache.Cache {
 }
 
 func PutString(ctx context.Context, key, value string, ttl time.Duration) error {
-	if err := cli.Set(&cache.Item{
-		Ctx:   ctx,
-		Key:   key,
-		Value: value,
-		TTL:   ttl,
-	}); err != nil {
+	if err := cli.Set(buildItem(ctx, key, value, ttl)); err != nil {
 		return errors.Join(err, ErrPutString)
 	}
 	return nil
@@ -44,4 +39,13 @@ func GetString(ctx context.Context, key string) (string, error) {
 		return wanted, nil
 	}
 	return wanted, errors.Join(err, ErrGetString)
+}
+
+func buildItem(ctx context.Context, key string, value any, ttl time.Duration) *cache.Item {
+	return &cache.Item{
+		Ctx:   ctx,
+		Key:   redis.WithPrefix(key),
+		Value: value,
+		TTL:   ttl,
+	}
 }

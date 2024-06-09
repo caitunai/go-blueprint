@@ -21,7 +21,7 @@ go install golang.org/x/tools/cmd/gonew@latest
 ## Develop and Run
 install air
 ```shell
-go install github.com/cosmtrek/air@latest
+go install github.com/air-verse/air@latest
 ```
 create the configuration and update the content
 ```shell

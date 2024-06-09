@@ -10,7 +10,6 @@ func WithPrefix(k string) string {
 	prefix := viper.GetString("redis.prefix")
 	if prefix != "" {
 		return prefix + ":" + k
-	} else {
-		return k
 	}
+	return k
 }

@@ -28,6 +28,9 @@ func RegisterUser(ctx context.Context, accountID uint) (*User, error) {
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
+	if u.ID > 0 {
+		return u, nil
+	}
 	u.AccountID = accountID
 	err = u.Save(ctx)
 	if err != nil {

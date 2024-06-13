@@ -2,8 +2,8 @@ package base
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,15 +15,67 @@ import (
 	"github.com/spf13/viper"
 )
 
-var (
-	ErrCookieURLParse = errors.New("parse url from configuration failed")
-	ErrCookieDecode   = errors.New("decode cookie failed")
+var ErrCookieDecode = errors.New("decode cookie failed")
+
+const (
+	HTTP  = "http"
+	HTTPS = "https"
 )
 
 type Context struct {
 	*gin.Context
 	user *db.User
 	cmx  sync.RWMutex
+}
+
+func (c *Context) Scheme() string {
+	// Can't use `r.Request.URL.Scheme`
+	// See: https://groups.google.com/forum/#!topic/golang-nuts/pMUkBlQBDF0
+	if c.Request.TLS != nil {
+		return HTTPS
+	}
+	if scheme := c.GetHeader("X-Forwarded-Proto"); scheme != "" {
+		return scheme
+	}
+	if scheme := c.GetHeader("X-Forwarded-Protocol"); scheme != "" {
+		return scheme
+	}
+	if ssl := c.GetHeader("X-Forwarded-Ssl"); ssl == "on" {
+		return HTTPS
+	}
+	if scheme := c.GetHeader("X-Url-Scheme"); scheme != "" {
+		return scheme
+	}
+	return HTTP
+}
+
+func (c *Context) Port() string {
+	port := c.GetHeader("X-Forwarded-Port")
+	if port == "" {
+		port = c.Request.URL.Port()
+	}
+	if port == "" {
+		port = "80"
+	}
+	return port
+}
+
+func (c *Context) Origin() string {
+	scheme := c.Scheme()
+	port := c.Port()
+	if scheme == HTTP || port == "80" {
+		port = ""
+	}
+	if scheme == HTTPS || port == "443" {
+		port = ""
+	}
+	if c.Request.Host == "" {
+		return viper.GetString("url")
+	}
+	if port == "" {
+		return fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+	}
+	return fmt.Sprintf("%s://%s:%s", scheme, c.Request.Host, port)
 }
 
 func (c *Context) getCSSJsFiles(entry string) (css, js []string) {
@@ -33,7 +85,7 @@ func (c *Context) getCSSJsFiles(entry string) (css, js []string) {
 	manifest := embed.ParseManifest()
 	css = manifest.GetCSSFiles(entry)
 	js = manifest.GetJsFiles(entry)
-	prefix := viper.GetString("url")
+	prefix := c.Origin()
 	for i, v := range css {
 		css[i] = prefix + "/" + v
 	}
@@ -134,17 +186,13 @@ func (c *Context) PayRequired(message string, data gin.H) {
 }
 
 func (c *Context) SendCookie(key, value string, second int) error {
-	link, err := url.Parse(viper.GetString("url"))
-	if err != nil {
-		return errors.Join(err, ErrCookieURLParse)
-	}
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		key,
 		util.Encrypt([]byte(viper.GetString("key")), value),
 		second,
 		"/",
-		link.Host,
+		"",
 		true,
 		true,
 	)

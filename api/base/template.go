@@ -79,16 +79,21 @@ func (r Render) LoadTemplates() {
 			pageName = strings.TrimSuffix(pageName, filepath.Ext(pageName))
 			pageName = strings.TrimPrefix(pageName, root+"/")
 			pageName = strings.ReplaceAll(pageName, "/", ".")
-			tmpl := tpl.New(pageName)
-			// 页面
-			content, err = r.readPageTemplateFile(include, pageName)
-			if err == nil {
-				_, err = tmpl.Parse(string(content))
-				if err != nil {
-					log.Error().Err(err).Msgf("Parse html templates failed: %s", include)
+			cloneTpl, cErr := tpl.Clone()
+			if cErr == nil {
+				tmpl := cloneTpl.New(pageName)
+				// read page
+				content, err = r.readPageTemplateFile(include, pageName)
+				if err == nil {
+					_, err = tmpl.Parse(string(content))
+					if err != nil {
+						log.Error().Err(err).Msgf("Parse html templates failed: %s", include)
+					}
 				}
+				r[pageName] = tmpl
+			} else {
+				log.Error().Err(cErr).Str("pageName", pageName).Msgf("clone html template failed: %s", include)
 			}
-			r[pageName] = tmpl
 		}
 	}
 }

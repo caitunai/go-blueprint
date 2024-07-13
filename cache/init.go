@@ -34,7 +34,7 @@ func PutString(ctx context.Context, key, value string, ttl time.Duration) error 
 
 func GetString(ctx context.Context, key string) (string, error) {
 	var wanted string
-	err := cli.Get(ctx, key, &wanted)
+	err := cli.Get(ctx, redis.WithPrefix(key), &wanted)
 	if err == nil {
 		return wanted, nil
 	}

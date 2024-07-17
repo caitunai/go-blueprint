@@ -212,6 +212,10 @@ func (c *Context) DecodeCookie(key string) (string, error) {
 	return "", nil
 }
 
+func (c *Context) GetUserID() uint {
+	return c.GetUint("uid")
+}
+
 func (c *Context) LoginUser() *db.User {
 	// 读锁并发安全
 	c.cmx.RLock()

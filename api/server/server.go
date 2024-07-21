@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spf13/viper"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/route"
 	"github.com/gin-contrib/cors"
@@ -60,6 +62,7 @@ func (s *Server) Start(ctx context.Context) {
 		AllowOrigins: []string{
 			"https://www.example.com",
 			"https://example.com",
+			viper.GetString("url"),
 		},
 		AllowMethods:     []string{"POST", "PUT", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "x-requested-with"},

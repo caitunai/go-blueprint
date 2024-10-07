@@ -16,7 +16,7 @@ go install golang.org/x/tools/cmd/gonew@latest
 >
 > ⚠️ Do not forget to replace the go module name in this `.golangci.yaml`:
 >
-> Replace [github.com/caitunai/go-blueprint](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml#L79) to `github.com/yourname/project`.
+> Replace [github.com/caitunai/go-blueprint](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml#L93) to `github.com/yourname/project`.
 
 ## Develop and Run
 install air

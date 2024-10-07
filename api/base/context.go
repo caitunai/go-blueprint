@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/embed"
@@ -24,8 +23,6 @@ const (
 
 type Context struct {
 	*gin.Context
-	user *db.User
-	cmx  sync.RWMutex
 }
 
 func (c *Context) Scheme() string {
@@ -217,28 +214,17 @@ func (c *Context) GetUserID() uint {
 }
 
 func (c *Context) LoginUser() *db.User {
-	// 读锁并发安全
-	c.cmx.RLock()
-	if c.user != nil {
-		defer c.cmx.RUnlock()
-		return c.user
+	u, ok := c.Get("user")
+	if ok {
+		return u.(*db.User)
 	}
-	c.cmx.RUnlock()
-
-	// 数据更新，会加写锁
-	c.SetUser(db.GetUser(c.Request.Context(), c.GetUint("uid")))
-
-	// 返回赋值需要加读锁
-	c.cmx.RLock()
-	defer c.cmx.RUnlock()
-	return c.user
+	qu := db.GetUser(c.Request.Context(), c.GetUserID())
+	c.SetUser(qu)
+	return qu
 }
 
 func (c *Context) SetUser(u *db.User) {
-	// 写锁并发安全
-	c.cmx.Lock()
-	defer c.cmx.Unlock()
-	c.user = u
+	c.Set("user", u)
 }
 
 func (c *Context) IsWechatMiniProgram() bool {

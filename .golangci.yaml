@@ -51,9 +51,6 @@ linters:
 
 linters-settings:
   govet:
-    # Report about shadowed variables.
-    # Default: false
-    check-shadowing: true
     # Settings per analyzer.
     settings:
       shadow:

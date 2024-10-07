@@ -2,6 +2,8 @@ package util
 
 import (
 	"crypto/md5"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"regexp"
@@ -73,4 +75,13 @@ func SplitByWidth(str string, size int) []string {
 		splited = append(splited, string(chars[i:stop]))
 	}
 	return splited
+}
+
+func RandomString(length int) string {
+	b := make([]byte, length/2)
+	_, err := rand.Read(b)
+	if err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }

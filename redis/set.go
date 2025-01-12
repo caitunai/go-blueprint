@@ -27,8 +27,8 @@ func AddSortItem(ctx context.Context, key, item string, value int64) error {
 }
 
 // RemoveSortItem remove items include min, max value
-func RemoveSortItem(ctx context.Context, key string, min, max int64) error {
-	res := rdb.ZRemRangeByScore(ctx, key, strconv.FormatInt(min, 10), strconv.FormatInt(max, 10))
+func RemoveSortItem(ctx context.Context, key string, minV, maxV int64) error {
+	res := rdb.ZRemRangeByScore(ctx, key, strconv.FormatInt(minV, 10), strconv.FormatInt(maxV, 10))
 	err := res.Err()
 	if err != nil {
 		return errors.Join(err, ErrRemoveSortItem)

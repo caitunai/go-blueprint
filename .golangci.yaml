@@ -6,13 +6,13 @@ run:
   skip-files: []
 
 output:
-  uniq-by-line: true
   print-linter-name: true
 
 issues:
   exclude:
     - ".*getCssJsFiles` is unused"
     - "shadow: declaration of \"err\" shadows declaration at"
+  uniq-by-line: true
 
 linters:
   disable-all: true

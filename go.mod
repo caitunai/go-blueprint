@@ -2,8 +2,10 @@ module github.com/caitunai/go-blueprint
 
 go 1.23.0
 
+toolchain go1.24.1
+
 require (
-	github.com/ThreeDotsLabs/watermill v1.4.4
+	github.com/ThreeDotsLabs/watermill v1.4.5
 	github.com/ThreeDotsLabs/watermill-redisstream v1.4.2
 	github.com/gin-contrib/cors v1.7.3
 	github.com/gin-contrib/logger v1.2.3

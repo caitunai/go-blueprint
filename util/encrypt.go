@@ -55,7 +55,7 @@ func Decrypt(key []byte, cryptoText string) string {
 
 	plaintext, err := aesGCM.Open(nil, nonce, []byte(texts[0]), nil)
 	if err != nil {
-		panic(err.Error())
+		return ""
 	}
 
 	return string(plaintext)

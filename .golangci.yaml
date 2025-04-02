@@ -98,6 +98,8 @@ linters-settings:
           - github.com/ThreeDotsLabs/watermill
           - github.com/ThreeDotsLabs/watermill-redisstream
           - github.com/ThreeDotsLabs/watermill/message
+          - gorm.io/driver
+          - gorm.io/gorm
         # Packages that are not allowed where the value is a suggestion.
         deny:
           - pkg: "reflect"

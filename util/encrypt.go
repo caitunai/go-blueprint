@@ -6,53 +6,57 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"strings"
 )
 
-// Encrypt string to base64 crypto using AES
+// Encrypt string to base64 crypto using GCM
+// The key should be 16 bytes (AES-128) or 32 (AES-256)
 func Encrypt(key []byte, text string) string {
-	plaintext := []byte(text)
-
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return ""
 	}
 
-	// The IV needs to be unique, but not secure. Therefore, it's common to
-	// include it at the beginning of the ciphertext.
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	// Never use more than 2^32 random nonces with a given key because of the risk of a repeat.
+	nonce := make([]byte, 12)
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
 		return ""
 	}
 
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return ""
+	}
+
+	ciphertext := aesGCM.Seal(nil, nonce, []byte(text), nil)
 
 	// convert to base64
-	return hex.EncodeToString(ciphertext)
+	return hex.EncodeToString(ciphertext) + "." + hex.EncodeToString(nonce)
 }
 
 // Decrypt from base64 to decrypted string
+// The key should be 16 bytes (AES-128) or 32 (AES-256)
 func Decrypt(key []byte, cryptoText string) string {
-	ciphertext, _ := hex.DecodeString(cryptoText)
+	texts := strings.Split(cryptoText, ".")
+	if len(texts) != 2 {
+		return ""
+	}
+	nonce, _ := hex.DecodeString(texts[1])
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return ""
 	}
 
-	// The IV needs to be unique, but not secure. Therefore, it's common to
-	// include it at the beginning of the ciphertext.
-	if len(ciphertext) < aes.BlockSize {
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
 		return ""
 	}
-	iv := ciphertext[:aes.BlockSize]
-	ciphertext = ciphertext[aes.BlockSize:]
 
-	stream := cipher.NewCFBDecrypter(block, iv)
+	plaintext, err := aesGCM.Open(nil, nonce, []byte(texts[0]), nil)
+	if err != nil {
+		panic(err.Error())
+	}
 
-	// XORKeyStream can work in-place if the two arguments are the same.
-	stream.XORKeyStream(ciphertext, ciphertext)
-
-	return string(ciphertext)
+	return string(plaintext)
 }

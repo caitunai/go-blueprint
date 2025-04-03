@@ -41,6 +41,7 @@ func Decrypt(key []byte, cryptoText string) string {
 	if len(texts) != 2 {
 		return ""
 	}
+	data, _ := hex.DecodeString(texts[0])
 	nonce, _ := hex.DecodeString(texts[1])
 
 	block, err := aes.NewCipher(key)
@@ -53,7 +54,7 @@ func Decrypt(key []byte, cryptoText string) string {
 		return ""
 	}
 
-	plaintext, err := aesGCM.Open(nil, nonce, []byte(texts[0]), nil)
+	plaintext, err := aesGCM.Open(nil, nonce, []byte(data), nil)
 	if err != nil {
 		return ""
 	}

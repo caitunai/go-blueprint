@@ -1,4 +1,6 @@
 .app.toml
 .app.toml.*
+!.app.toml.example
 .env
 .env.*
+!env.example

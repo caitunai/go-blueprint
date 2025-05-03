@@ -3,12 +3,12 @@ package db
 
 import (
 	"fmt"
-	"gorm.io/gorm/schema"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 var db *gorm.DB

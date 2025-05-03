@@ -3,6 +3,7 @@ package db
 
 import (
 	"fmt"
+	"gorm.io/gorm/schema"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -35,6 +36,9 @@ func Conn() *gorm.DB {
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   NewLogger(),
+		NamingStrategy: schema.NamingStrategy{
+			TablePrefix: viper.GetString("db.table_prefix"),
+		},
 	})
 	if err != nil {
 		log.Fatal().Err(err).Send()

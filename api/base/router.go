@@ -99,13 +99,13 @@ func (r *Router) wrapRoute(method string, relativePath string, handlers ...Handl
 	case http.MethodDelete:
 		return r.RouterGroup.DELETE(relativePath, hds...)
 	case http.MethodConnect:
-		return r.RouterGroup.Handle(http.MethodConnect, relativePath, hds...)
+		return r.Handle(http.MethodConnect, relativePath, hds...)
 	case "use":
 		return r.RouterGroup.Use(hds...)
 	case "group":
 		return r.RouterGroup.Group(relativePath, hds...)
 	}
-	return r.RouterGroup.Handle(http.MethodTrace, relativePath, hds...)
+	return r.Handle(http.MethodTrace, relativePath, hds...)
 }
 
 func wrapHandler(hd HandlerFunc) gin.HandlerFunc {

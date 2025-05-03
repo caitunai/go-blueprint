@@ -1,108 +1,95 @@
+version: "2"
 run:
   concurrency: 1
-  timeout: 1m
   issues-exit-code: 1
   tests: true
-
-output:
-  print-linter-name: true
-
-issues:
-  exclude:
-    - ".*getCssJsFiles` is unused"
-    - "shadow: declaration of \"err\" shadows declaration at"
-  uniq-by-line: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
     - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
     - depguard
     - dupl
     - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - forbidigo
+    - goconst
     - gocritic
-    - gofmt
-    - gofumpt
-    - gosimple
     - govet
     - ineffassign
+    - makezero
     - nakedret
     - nolintlint
     - revive
     - staticcheck
-    - stylecheck
-    - typecheck
     - unconvert
     - unused
     - wastedassign
-    - errname
-    - bodyclose
-    - contextcheck
-    - containedctx
-    - errchkjson
-    - errorlint
-    - forbidigo
-    - goconst
-    - makezero
     - whitespace
     - wrapcheck
     - zerologlint
-
-linters-settings:
-  govet:
-    # Settings per analyzer.
-    settings:
-      shadow:
-        # Whether to be strict about shadowing; can be noisy.
-        # Default: false
-        strict: true
-    # Disable all analyzers.
-    # Default: false
-    enable-all: true
-  depguard:
-    # Rules to apply.
-    #
-    # Variables:
-    # - File Variables
-    #   you can still use and exclamation mark ! in front of a variable to say not to use it.
-    #   Example !$test will match any file that is not a go test file.
-    #
-    #   `$all` - matches all go files
-    #   `$test` - matches all go test files
-    #
-    # - Package Variables
-    #
-    #  `$gostd` - matches all of go's standard library (Pulled from `GOROOT`)
-    #
-    # Default: Only allow $gostd in all files.
+  settings:
+    depguard:
+      rules:
+        main:
+          files:
+            - $all
+          allow:
+            - $all
+            - $gostd
+            - github.com/caitunai/go-blueprint
+            - github.com/rs/zerolog
+            - github.com/spf13/viper
+            - github.com/gin-gonic/gin
+            - github.com/redis/go-redis
+            - github.com/go-redis/cache
+            - github.com/spf13/cobra
+            - github.com/gin-contrib
+            - github.com/golang-jwt/jwt
+            - github.com/ThreeDotsLabs/watermill
+            - github.com/ThreeDotsLabs/watermill-redisstream
+            - github.com/ThreeDotsLabs/watermill/message
+            - gorm.io/driver
+            - gorm.io/gorm
+          deny:
+            - pkg: reflect
+              desc: not allowed
+            - pkg: github.com/pkg/errors
+              desc: Should be replaced by standard lib errors package
+    govet:
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      # Name of a rule.
-      main:
-        # List of file globs that will match this list of settings to compare against.
-        # Default: $all
-        files:
-          - $all
-        # List of allowed packages.
-        allow:
-          - $all
-          - $gostd
-          - github.com/caitunai/go-blueprint
-          - github.com/rs/zerolog
-          - github.com/spf13/viper
-          - github.com/gin-gonic/gin
-          - github.com/redis/go-redis
-          - github.com/go-redis/cache
-          - github.com/spf13/cobra
-          - github.com/gin-contrib
-          - github.com/golang-jwt/jwt
-          - github.com/ThreeDotsLabs/watermill
-          - github.com/ThreeDotsLabs/watermill-redisstream
-          - github.com/ThreeDotsLabs/watermill/message
-          - gorm.io/driver
-          - gorm.io/gorm
-        # Packages that are not allowed where the value is a suggestion.
-        deny:
-          - pkg: "reflect"
-            desc: not allowed
-          - pkg: "github.com/pkg/errors"
-            desc: Should be replaced by standard lib errors package
+      - path: (.+)\.go$
+        text: 'getCSSJsFiles is unused'
+      - path: (.+)\.go$
+        text: 'shadow: declaration of "err" shadows declaration at'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  uniq-by-line: true
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

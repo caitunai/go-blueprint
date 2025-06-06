@@ -3,7 +3,7 @@ The project template of Golang.
 
 ## How to use
 ```shell
-gonew github.com/caitunai/go-blueprint@v1.9.1 github.com/yourname/project
+gonew github.com/caitunai/go-blueprint@v1.9.2 github.com/yourname/project
 ```
 
 ## Install gonew
@@ -12,9 +12,9 @@ go install golang.org/x/tools/cmd/gonew@latest
 ```
 
 ## ⚠️ Update the hardcode
-> ⚠️ You need edit the `.golangci.yaml` file for `depguard` settings.
+> ⚠️ You need to edit the `.golangci.yaml` file for `depguard` settings.
 >
-> ⚠️ Do not forget to replace the go module name in this `.golangci.yaml`:
+> ⚠️ Remember to replace the go module name in this `.golangci.yaml`:
 >
 > Replace [github.com/caitunai/go-blueprint](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml#L93) to `github.com/yourname/project`.
 

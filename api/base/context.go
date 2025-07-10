@@ -9,7 +9,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/embed"
-	"github.com/caitunai/go-blueprint/util"
+	"github.com/caitunai/go-blueprint/xutil"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 )
@@ -75,7 +75,7 @@ func (c *Context) Origin() string {
 	return fmt.Sprintf("%s://%s:%s", scheme, c.Request.Host, port)
 }
 
-func (c *Context) getCSSJsFiles(entry string) (css, js []string) {
+func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	if viper.GetString("mode") != "release" {
 		return
 	}
@@ -186,7 +186,7 @@ func (c *Context) SendCookie(key, value string, second int) error {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		key,
-		util.Encrypt([]byte(viper.GetString("key")), value),
+		xutil.Encrypt([]byte(viper.GetString("key")), value),
 		second,
 		"/",
 		"",
@@ -203,7 +203,7 @@ func (c *Context) DecodeCookie(key string) (string, error) {
 	}
 
 	if cookie != "" {
-		id := util.Decrypt([]byte(viper.GetString("key")), cookie)
+		id := xutil.Decrypt([]byte(viper.GetString("key")), cookie)
 		return id, nil
 	}
 	return "", nil

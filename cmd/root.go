@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"strings"
 
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/rs/zerolog"
@@ -44,7 +45,7 @@ func init() {
 
 func initConfig() {
 	if cfgFile != "" {
-		// Use config file from the flag.
+		// Use a config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
 		// Find home directory.
@@ -56,6 +57,7 @@ func initConfig() {
 		viper.SetConfigType("toml")
 		viper.SetConfigName(".app")
 	}
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err == nil {
 		log.Trace().Msgf("Using config file: %s", viper.ConfigFileUsed())

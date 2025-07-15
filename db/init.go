@@ -37,7 +37,7 @@ func Conn() *gorm.DB {
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   NewLogger(),
 		NamingStrategy: schema.NamingStrategy{
-			TablePrefix: viper.GetString("db.table_prefix"),
+			TablePrefix: viper.GetString("db.table.prefix"),
 		},
 	})
 	if err != nil {

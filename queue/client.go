@@ -50,8 +50,8 @@ func Start(ctx context.Context, subscriberID string) error {
 	subscriber, err = redisstream.NewSubscriber(
 		redisstream.SubscriberConfig{
 			Client:        redis.GetClient(),
-			Consumer:      viper.GetString("queue.consumer") + subscriberID,
-			ConsumerGroup: viper.GetString("queue.consumer_group"),
+			Consumer:      viper.GetString("queue.consumer.name") + subscriberID,
+			ConsumerGroup: viper.GetString("queue.consumer.group"),
 		},
 		NewLogger(),
 	)
@@ -66,7 +66,7 @@ func Start(ctx context.Context, subscriberID string) error {
 	SubscribeJob()
 	// Wait for interrupt signal to gracefully shut down the queue with
 	quit := make(chan os.Signal, 1)
-	// kill (no param) default send syscall.SIGTERM
+	// kill (no param) default sends syscall.SIGTERM
 	// kill -2 is syscall.SIGINT
 	// kill -9 is syscall.SIGKILL but can't be caught, so don't need to add it
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

@@ -15,8 +15,10 @@ password="password"
 database="db_name"
 host="localhost"
 port="3306"
-table_prefix=""
 tls=false
+
+[db.table]
+prefix=""
 
 [redis]
 host="127.0.0.1"
@@ -28,8 +30,10 @@ prefix="app"
 [queue]
 prefix="test"
 topics=["default"]
-consumer="default"
-consumer_group="default"
+
+[queue.consumer]
+name="default"
+group="default"
 
 [oauth]
 key="oauth_app_id_or_key"

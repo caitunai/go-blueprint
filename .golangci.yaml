@@ -55,6 +55,8 @@ linters:
             - github.com/ThreeDotsLabs/watermill/message
             - gorm.io/driver
             - gorm.io/gorm
+            - ariga.io/atlas/atlasexec
+            - github.com/joho/godotenv
           deny:
             - pkg: reflect
               desc: not allowed

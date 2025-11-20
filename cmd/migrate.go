@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -10,15 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	atlasEnvName string
-)
+var atlasEnvName string
 
 // migrateCmd represents the migrate command
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Database migration tools using Atlas",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRun: func(_ *cobra.Command, _ []string) {
 		// load the environment from .env file
 		if err := godotenv.Load(); err != nil {
 			log.Error().Err(err).Str("file", ".env").Msg("failed to load .env file")
@@ -26,11 +25,13 @@ var migrateCmd = &cobra.Command{
 	},
 }
 
+var errAtlas = errors.New("atlas migrate error")
+
 // init the atlas client
 func getAtlasClient() (*atlasexec.Client, error) {
 	workdir, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, errAtlas)
 	}
 
 	client, err := atlasexec.NewClient(workdir, "atlas")
@@ -44,7 +45,7 @@ func getAtlasClient() (*atlasexec.Client, error) {
 var inspectCmd = &cobra.Command{
 	Use:   "inspect",
 	Short: "Inspect the baseline of the database",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := getAtlasClient()
 		if err != nil {
 			return err
@@ -59,9 +60,9 @@ var inspectCmd = &cobra.Command{
 			return fmt.Errorf("migration inspect failed: %w", err)
 		}
 
-		err = os.WriteFile("./atlas/schema/0-baseline.hcl", []byte(res), 0644)
+		err = os.WriteFile("./atlas/schema/0-baseline.hcl", []byte(res), 0o644)
 		if err != nil {
-			return err
+			return errors.Join(err, errAtlas)
 		}
 		log.Info().
 			Str("schema", "./atlas/schema/0-baseline.hcl").
@@ -111,7 +112,7 @@ migrate make add_users_table --env dev`,
 var applyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Applies pending migrations to the database",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := getAtlasClient()
 		if err != nil {
 			return err
@@ -150,7 +151,7 @@ var applyCmd = &cobra.Command{
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Get migration status",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := getAtlasClient()
 		if err != nil {
 			return err
@@ -160,7 +161,7 @@ var statusCmd = &cobra.Command{
 			Env: atlasEnvName,
 		})
 		if err != nil {
-			return err
+			return errors.Join(err, errAtlas)
 		}
 
 		log.Info().

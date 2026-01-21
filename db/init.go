@@ -3,6 +3,7 @@ package db
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -31,13 +32,17 @@ func Conn() *gorm.DB {
 	if tls {
 		dsn += "&tls=true"
 	}
+	prefix := viper.GetString("db.table_prefix")
+	if prefix != "" && !strings.HasSuffix(prefix, "_") {
+		prefix += "_"
+	}
 	dsn = fmt.Sprintf(dsn, user, pass, host, port, dbname)
 	var err error
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   NewLogger(),
 		NamingStrategy: schema.NamingStrategy{
-			TablePrefix: viper.GetString("db.table.prefix"),
+			TablePrefix: prefix,
 		},
 	})
 	if err != nil {

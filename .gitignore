@@ -394,10 +394,10 @@ $RECYCLE.BIN/
 *.toml
 /tmp/
 go.work.sum
-/embed/*/*
+/storage/*/*
 stats.html
 *.key
-!/embed/*/*.html
-!/embed/*/*.txt
+!/storage/*/*.html
+!/storage/*/*.txt
 !.gitkeep
 go-blueprint

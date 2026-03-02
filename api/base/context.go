@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/caitunai/go-blueprint/db"
-	"github.com/caitunai/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/storage"
 	"github.com/caitunai/go-blueprint/xutil"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -79,7 +79,7 @@ func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	if viper.GetString("mode") != "release" {
 		return
 	}
-	manifest := embed.ParseManifest()
+	manifest := storage.ParseManifest()
 	css = manifest.GetCSSFiles(entry)
 	js = manifest.GetJsFiles(entry)
 	prefix := c.Origin()

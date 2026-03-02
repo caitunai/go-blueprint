@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caitunai/go-blueprint/embed"
+	"github.com/caitunai/go-blueprint/storage"
 	"github.com/gin-gonic/gin/render"
 	"github.com/rs/zerolog/log"
 )
@@ -47,7 +47,7 @@ func (r Render) LoadTemplates() {
 	root := "views"
 	layoutFolder := "layout"
 	sharedFolder := "shared"
-	includes, _ := fs.Glob(embed.FS, root+"/**/*.html")
+	includes, _ := fs.Glob(storage.FS, root+"/**/*.html")
 
 	// Generate our templates map from our layout/ and shared/ directories
 	layouts := make([]string, 0)
@@ -119,7 +119,7 @@ func (r Render) getTemplateName(fileName string) string {
 }
 
 func (r Render) readLayoutFile(file string) ([]byte, error) {
-	content, err := embed.FS.ReadFile(file)
+	content, err := storage.FS.ReadFile(file)
 	if err == nil {
 		tplName := r.getFileName(file)
 		prefix := []byte("{{ define \"" + tplName + "\" }}")
@@ -133,7 +133,7 @@ func (r Render) readLayoutFile(file string) ([]byte, error) {
 }
 
 func (r Render) readPageTemplateFile(file, pageName string) ([]byte, error) {
-	content, err := embed.FS.ReadFile(file)
+	content, err := storage.FS.ReadFile(file)
 	if err == nil {
 		tplName := r.getFileName(file)
 		tmpName := r.getTemplateName(tplName)

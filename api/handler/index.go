@@ -17,3 +17,13 @@ func HomePage(c *base.Context) {
 		})
 	}
 }
+
+func APIHomePage(c *base.Context) {
+	user := c.LoginUser()
+	if user == nil {
+		c.Forbidden("you are not login", gin.H{})
+	}
+	c.Success(gin.H{
+		"user": user,
+	})
+}

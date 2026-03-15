@@ -21,6 +21,13 @@ const (
 	HTTPS = "https"
 )
 
+// APIUser The api user information from bearer token, issuer is jwt iss attribute
+// user is jwt sub attribute
+type APIUser struct {
+	User   string `json:"user"`
+	Issuer string `json:"issuer"`
+}
+
 type Context struct {
 	*gin.Context
 }
@@ -225,6 +232,18 @@ func (c *Context) LoginUser() *db.User {
 
 func (c *Context) SetUser(u *db.User) {
 	c.Set("user", u)
+}
+
+func (c *Context) SetAPIUser(u *APIUser) {
+	c.Set("api_user", u)
+}
+
+func (c *Context) GetAPIUser() *APIUser {
+	u, ok := c.Get("api_user")
+	if ok {
+		return u.(*APIUser)
+	}
+	return nil
 }
 
 func (c *Context) IsWechatMiniProgram() bool {

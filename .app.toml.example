@@ -40,3 +40,8 @@ key="oauth_app_id_or_key"
 secret="oauth_app_secret"
 api="https://www.example.com"
 publicKeyPath="/path/to/oauth-public.key"
+
+[auth.api]
+secret="32-chars-length"
+audience="name of this api"
+issuers=[ "allowed name of issuer" ]

@@ -3,7 +3,9 @@ package route
 import (
 	"crypto/rsa"
 	"errors"
+	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,11 +18,13 @@ import (
 )
 
 var (
+	jwtSecret         []byte
 	publicKey         *rsa.PublicKey
 	oauthCallbackPath = "oauth/path/to/callback"
 )
 
 func InitMiddleware() {
+	jwtSecret = []byte(viper.GetString("auth.api.secret"))
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
 	if err != nil {
 		log.Error().Err(err).Msg("read oauth public key failed")
@@ -33,6 +37,7 @@ func InitMiddleware() {
 	}
 }
 
+// This middleware can be used to verify the login status of real users.
 func authorized(c *base.Context) {
 	uid := c.GetUint("uid")
 	if uid == 0 {
@@ -41,6 +46,20 @@ func authorized(c *base.Context) {
 		return
 	}
 
+	c.Next()
+}
+
+// This middleware can be used to verify the authorization status of a JWT token for an API.
+func apiAuthorized(c *base.Context) {
+	apiUser := c.GetAPIUser()
+	if apiUser == nil {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"status":  http.StatusForbidden,
+			"message": "unauthorized",
+			"data":    gin.H{},
+		})
+		return
+	}
 	c.Next()
 }
 
@@ -58,6 +77,9 @@ func AttemptAuth() base.HandlerFunc {
 			if bearerToken != "" {
 				var accountID uint64
 				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
+						return jwtSecret, nil
+					}
 					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 						return nil, errors.New("sign method error")
 					}
@@ -74,7 +96,19 @@ func AttemptAuth() base.HandlerFunc {
 					if err != nil {
 						log.Error().Err(err).Msg("get token id error")
 					}
-					accountID, _ = strconv.ParseUint(sub, 10, 64)
+					accountID, err = strconv.ParseUint(sub, 10, 64)
+					if err != nil {
+						audiences, err := token.Claims.GetAudience()
+						if err == nil && slices.Contains(audiences, viper.GetString("auth.api.audience")) {
+							issuer, err := token.Claims.GetIssuer()
+							if err == nil && slices.Contains(viper.GetStringSlice("auth.api.issuers"), issuer) {
+								c.SetAPIUser(&base.APIUser{
+									User:   sub,
+									Issuer: issuer,
+								})
+							}
+						}
+					}
 				}
 				if accountID > 0 {
 					u, err := db.RegisterUser(c.Request.Context(), uint(accountID))

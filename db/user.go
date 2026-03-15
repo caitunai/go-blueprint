@@ -12,8 +12,15 @@ type User struct {
 	AccountID uint `gorm:"index" json:"account_id"`
 }
 
+var _ IDModel = &User{}
+
 func (u *User) Save(ctx context.Context) error {
 	return DB().WithContext(ctx).Save(u).Error
+}
+
+func (u *User) GetID() uint { return u.ID }
+
+func (u *User) LoadRelation(_ context.Context, _ ...string) {
 }
 
 func GetUser(ctx context.Context, uid uint) *User {

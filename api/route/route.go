@@ -18,11 +18,15 @@ func InitRoute(r *base.Router) {
 
 func initPackageHandler(r *base.Router) {
 	r.GET("/", handler.HomePage)
-	// 微信业务域名验证
+
+	// Wechat domain validation
 	r.StaticFileFS("/W98wUxrfSS.txt", "/W98wUxrfSS.txt", http.FS(storage.Static))
 }
 
 func initAPIHandler(r *base.Router) {
 	api := r.Group("/api", apiAuthorized)
 	api.GET("/", handler.APIHomePage)
+
+	// Add CRUD services for db.User
+	handler.UserControl(api.Group("/users"))
 }

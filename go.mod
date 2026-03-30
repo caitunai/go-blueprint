@@ -9,7 +9,7 @@ require (
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/ThreeDotsLabs/watermill-redisstream v1.4.5
 	github.com/gin-contrib/cors v1.7.7
-	github.com/gin-contrib/logger v1.2.6
+	github.com/gin-contrib/logger v1.2.7
 	github.com/gin-contrib/requestid v1.0.6
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-redis/cache/v9 v9.0.0

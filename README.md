@@ -203,7 +203,7 @@ Once the baseline is established in `prod`, you can repeat migration steps for `
 2. Generate migrations:
 
 ```bash
-atlas migrate diff <migration_name> --env dev
+atlas migrate diff <migration_name> --env local
 ```
 
 3. Apply migrations:

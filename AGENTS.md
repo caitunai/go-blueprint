@@ -82,3 +82,132 @@ r.GET("/", handler.HomePage)
 - /storage/static : This directory is used to store static asset files, which can include HTML, JavaScript, CSS, images, etc. These files will be bundled into the Golang binary during the compilation process.
 - /storage/views : This directory is used to store HTML files that will be rendered by Golang. HTML files can be categorized into subfolders based on their functionality. Place basic layout files in the `/storage/views/layout` directory, shared components in the `/storage/views/shared` directory, and other specific pages can be categorized according to their functional modules. To automatically reference the layout, page files need to follow the naming convention. The convention is as follows: If the base layout file is named `mylayout.html`, the functional page file should be named `feature.mylayout.html`, i.e., `featureName` + `layoutFileName`.
 - /storage/ui : This directory is used to store programs related to front-end frameworks, such as independent programs for Vue, React, and other front-end projects.
+
+# Database Table Definitions and Database Migrations
+1. When you need to modify database tables or fields, use the atlas tool to define the tables and generate migration files. Database tables should be defined in the `/atlas/schema` directory, and it is recommended to define tables for related modules in a single file. The configuration file for the atlas tool is located in this repository at `/atlas.hcl`.
+
+2. Generate migrations:
+
+```bash
+atlas migrate diff <migration_name> --env local
+```
+
+3. Apply migrations:
+
+```bash
+atlas migrate apply --env local
+```
+
+# CRUD actions for GORM model
+When you need to provide CRUD operations for a database model (GORM) struct, you can quickly implement them as follows:
+1. Have the model implement the `IDModel` interface in `db/crud_core.go`, providing the model’s ID and the loading method for related GORM models.
+2. When creating or updating data, create an input form structure that implements the `InputConverter` interface in `db/crud_core.go` to convert the input data into GORM model data.
+3. When reading Gorm model data for display, implement the `ViewConverter` interface in `db/crud_core.go` for the output data structure to convert the Gorm model into the output structure.
+4. When providing search or listing services, you need to support search and filtering capabilities. In this case, have the input form data structure implement the `Searcher` interface in `db/crud_core.go` to dynamically add search and filter conditions.
+5. Finally, provide a CRUD service corresponding to the Model, register it using `NewCrudController`, and add it to the routing.
+
+Below is an implementation of CRUD operations for a user model:
+```go
+type User struct {
+    gorm.Model
+    AccountID uint `gorm:"index" json:"account_id"`
+    Account   *Account
+}
+
+var _ IDModel = &User{}
+
+func (u *User) GetID() uint { return u.ID }
+
+func (u *User) LoadRelation(ctx context.Context, relations ...string) {
+    for _, relation := range relations {
+        db.WithContext(ctx).Model(u).Association(relation).Find(u.Account)
+    }
+}
+```
+The CRUD service and controller for User Model:
+```go
+
+type UserCreateForm struct {
+	AccountID uint `form:"account_id" json:"account_id" binding:"required"`
+}
+
+func (u *UserCreateForm) ToModel() *db.User {
+	return &db.User{
+		AccountID: u.AccountID,
+	}
+}
+
+type UserUpdateForm struct {
+	Name      string `form:"name" json:"name" binding:"required"`
+	AccountID uint   `form:"account_id" json:"account_id" binding:"required"`
+}
+
+func (u *UserUpdateForm) ToModel() *db.User {
+	p := &db.User{
+		AccountID: u.AccountID,
+	}
+	p.ID = 0
+	return p
+}
+
+type UserPublicView struct {
+	Name      string `json:"name"`
+	AccountID uint   `json:"account_id"`
+	ID        uint   `json:"id"`
+}
+
+func (u *UserPublicView) FromModel(p *db.User) *UserPublicView {
+	return &UserPublicView{
+		ID:        p.ID,
+		Name:      "",
+		AccountID: p.AccountID,
+	}
+}
+
+func (u *UserPublicView) Preloads() []string {
+	return []string{}
+}
+
+type UserSearchInput struct {
+	AccountID uint `form:"account_id"`
+}
+
+func (u *UserSearchInput) GetScopes() []func(*gorm.DB) *gorm.DB {
+	var scopes []func(*gorm.DB) *gorm.DB
+
+	// 1. Also, You can add preloads to *gorm.DB at here.
+
+	// 2. Filter by account_id
+	if u.AccountID > 0 {
+		scopes = append(scopes, func(db *gorm.DB) *gorm.DB {
+			return db.Where("account_id", u.AccountID)
+		})
+	}
+
+	return scopes
+}
+
+func UserControl(r *base.Router) {
+	// Generic parameters：Model, Create, Update, View, Search
+	providerService := db.NewCrudService[
+		*db.User,
+		*UserCreateForm,
+		*UserUpdateForm,
+		*UserPublicView,
+		*UserSearchInput,
+	](
+		func() *db.User {
+			return &db.User{}
+		},
+		func() *UserPublicView {
+			return &UserPublicView{}
+		},
+		func() *UserSearchInput {
+			return &UserSearchInput{}
+		},
+	)
+	providerCtrl := NewCrudController(providerService)
+	providerCtrl.RegisterRoutes(r)
+}
+```
+Related files for CRUD services are: `/api/handler/crud_base.go`, `/db/crud_core.go`, `/db/crud_pagination.go`, `/db/crud_service.go`

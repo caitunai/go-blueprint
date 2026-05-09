@@ -111,12 +111,16 @@ func AttemptAuth() base.HandlerFunc {
 					}
 				}
 				if accountID > 0 {
-					u, err := db.RegisterUser(c.Request.Context(), uint(accountID))
-					if err != nil {
-						uid = 0
-					} else if u != nil {
-						c.SetUser(u)
-						uid = uint64(u.ID)
+					if c.IsDatabaseEnabled() {
+						u, err := db.RegisterUser(c.Request.Context(), uint(accountID))
+						if err != nil {
+							uid = 0
+						} else if u != nil {
+							c.SetUser(u)
+							uid = uint64(u.ID)
+						}
+					} else {
+						uid = accountID
 					}
 				}
 			}

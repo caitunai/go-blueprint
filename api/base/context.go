@@ -258,3 +258,8 @@ func (c *Context) GetWechatAppID() string {
 	}
 	return appid
 }
+
+func (c *Context) IsDatabaseEnabled() bool {
+	dbName := viper.GetString("db.database")
+	return dbName != ""
+}

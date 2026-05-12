@@ -32,7 +32,7 @@ func Conn() *gorm.DB {
 	if tls {
 		dsn += "&tls=true"
 	}
-	prefix := viper.GetString("db.table_prefix")
+	prefix := viper.GetString("db.table.prefix")
 	if prefix != "" && !strings.HasSuffix(prefix, "_") {
 		prefix += "_"
 	}

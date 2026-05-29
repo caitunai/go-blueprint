@@ -12,6 +12,7 @@ Always use the latest stable version of Go (1.23 or 1.24 or newer) and be famili
 - Utilize the new Gin framework for routing
 - Implement proper handling of different HTTP methods (GET, POST, PUT, DELETE, etc.)
 - Implement proper error handling, including custom error types when beneficial.
+- Do not return errors with `fmt.Errorf`. Define package-level sentinel errors with `errors.New`, return them directly when no underlying cause exists, and use `errors.Join(ErrSpecific, err)` when preserving an underlying error. This keeps errors testable and classifiable with `errors.Is` / `errors.As`.
 - Use appropriate status codes and format JSON responses correctly.
 - Implement input validation for API endpoints.
 - Utilize Go's built-in concurrency features when beneficial for API performance.
@@ -26,6 +27,8 @@ Always use the latest stable version of Go (1.23 or 1.24 or newer) and be famili
 - Offer suggestions for testing the API endpoints using Go's testing package.
 - The programs you write must follow cybersecurity standards and protect user privacy.
 - Avoid using hardcoded values in the code; instead, use defined static variables or configuration files for settings whenever possible.
+- Avoid duplicated implementation logic. When two or more code paths share the same lifecycle, validation, query preparation, file output, cleanup, cache, decoding, or result-building logic, extract a small helper function or focused type instead of copying the block. Keep the abstraction narrow and type-safe, pass package-level sentinel errors into helpers when each caller needs its own error classification, and verify duplicate-code changes with `golangci-lint run --enable-only=dupl` in addition to the full lint run.
+- Use the `./.cache` directories for Go and golangci-lint. Set `GOCACHE`, `GOLANGCI_LINT_CACHE` into the `./.cache` directory, or similar cache environment variables to paths inside this repository unless the user explicitly asks for it.
 - For more requirements, please refer to the file and directory descriptions as well as the architecture description of this project.
 
 Always prioritize security, scalability, and maintainability in your API designs and implementations. Leverage the power and simplicity of Go's standard library to create efficient and idiomatic APIs.
@@ -77,6 +80,7 @@ r.GET("/", handler.HomePage)
 - /db : This directory is db package, used to store programs related to the database and ORM. All ORM-related types and operations should be placed in this directory. We use the `gorm.io/gorm` library as the underlying ORM, and database access via GORM can be obtained through the `db` variable. The `db` variable is globally accessible within the `db` package. In other packages, you can obtain a reference to `db` by calling `DB()` to use the ORM. You should try to avoid performing direct `db` operations outside of the `db` package.
 - /queue/job : This directory is used to store all programs related to queue jobs. For the Job interface specification, please refer to the description in `/queue/job/job.go` .
 - /redis : This directory is redis package, used to store all wrapper programs that directly operate on Redis data. It is important to note that when operating on Redis keys, you should use the `WithPrefix` function to add a prefix to the key, and this prefix is defined through the configuration file. The GetClient method in the redis package can be used to obtain a redis.Client object for operating on Redis. You can use GetClient in external packages. However, you should try to write Redis operation programs within the redis package for reuse in other packages. If it is a common caching operation, you should prioritize using the cache package.
+  Feature packages must not directly import or call `github.com/redis/go-redis/v9`; add wrapper functions in `/redis` and call those wrappers instead. Redis key prefixing must happen inside the redis package wrappers whenever possible.
 - /services : This directory is used to store programs that call functionalities of third-party or external systems. Programs that can exist relatively independently can also be placed in this folder.
 - /xutil : This folder is used to store custom utility functions. Independent and reusable utility functions can be placed here. This folder already includes encryption and decryption functions as well as some common string processing functions.
 - /storage/static : This directory is used to store static asset files, which can include HTML, JavaScript, CSS, images, etc. These files will be bundled into the Golang binary during the compilation process.
@@ -85,14 +89,22 @@ r.GET("/", handler.HomePage)
 
 # Database Table Definitions and Database Migrations
 1. When you need to modify database tables or fields, use the atlas tool to define the tables and generate migration files. Database tables should be defined in the `/atlas/schema` directory, and it is recommended to define tables for related modules in a single file. The configuration file for the atlas tool is located in this repository at `/atlas.hcl`.
-
-2. Generate migrations:
+2. In this project, the database tables prefix is defined in the `.app.toml`, should use the prefix when define tables.
+3. GORM database table definitions must follow these conventions:
+   - Use plural table names with the table prefix.
+   - Every table must have a single `id` primary key using auto-increment semantics. Do not use business keys or compound keys as the primary key.
+   - Every table must include `created_at` and `updated_at` fields.
+   - Do not define nullable columns. Use explicit defaults instead: empty string for strings, `0` for numbers, `false` or a clear default for booleans, and explicit status defaults when applicable.
+   - Business uniqueness must be enforced with unique indexes instead of primary keys.
+   - Avoid redundant indexes. If a left prefix of a composite index already covers the query pattern, do not add a separate duplicate prefix index.
+   - Keep Atlas schema, generated migrations, and GORM model structs consistent with each other.
+4. Generate migrations:
 
 ```bash
 atlas migrate diff <migration_name> --env local
 ```
 
-3. Apply migrations:
+5. Apply migrations:
 
 ```bash
 atlas migrate apply --env local

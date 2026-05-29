@@ -23,6 +23,8 @@ var (
 	oauthCallbackPath = "oauth/path/to/callback"
 )
 
+const unauthorizedMessage = "unauthorized"
+
 func InitMiddleware() {
 	jwtSecret = []byte(viper.GetString("auth.api.secret"))
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
@@ -54,9 +56,9 @@ func apiAuthorized(c *base.Context) {
 	apiUser := c.GetAPIUser()
 	if apiUser == nil {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"status":  http.StatusForbidden,
-			"message": "unauthorized",
-			"data":    gin.H{},
+			base.KeyStatus:  http.StatusForbidden,
+			base.KeyMessage: unauthorizedMessage,
+			base.KeyData:    gin.H{},
 		})
 		return
 	}

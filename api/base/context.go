@@ -17,8 +17,11 @@ import (
 var ErrCookieDecode = errors.New("decode cookie failed")
 
 const (
-	HTTP  = "http"
-	HTTPS = "https"
+	HTTP       = "http"
+	HTTPS      = "https"
+	KeyStatus  = "status"
+	KeyMessage = "message"
+	KeyData    = "data"
 )
 
 // APIUser The api user information from bearer token, issuer is jwt iss attribute
@@ -105,9 +108,9 @@ func (c *Context) Ok(body string) {
 
 func (c *Context) Success(data gin.H) {
 	c.JSON(http.StatusOK, gin.H{
-		"status":  0,
-		"message": "ok",
-		"data":    data,
+		KeyStatus:  0,
+		KeyMessage: "ok",
+		KeyData:    data,
 	})
 }
 
@@ -121,9 +124,9 @@ func (c *Context) Success(data gin.H) {
 func (c *Context) Error(code int, message string, data gin.H) {
 	c.Header("x-error-code", strconv.Itoa(code))
 	c.JSON(http.StatusInternalServerError, gin.H{
-		"status":  code,
-		"message": message,
-		"data":    data,
+		KeyStatus:  code,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
@@ -132,8 +135,8 @@ func (c *Context) Error(code int, message string, data gin.H) {
 // message the error message to response
 func (c *Context) ErrorMessage(message string) {
 	c.JSON(http.StatusInternalServerError, gin.H{
-		"status":  http.StatusInternalServerError,
-		"message": message,
+		KeyStatus:  http.StatusInternalServerError,
+		KeyMessage: message,
 	})
 }
 
@@ -143,49 +146,49 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 		"Bearer error=\"invalid_token\", error_description=\"The token is invalid, request with a new token\"",
 	)
 	c.JSON(http.StatusUnauthorized, gin.H{
-		"status":  http.StatusUnauthorized,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusUnauthorized,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
 func (c *Context) Forbidden(message string, data gin.H) {
 	c.JSON(http.StatusForbidden, gin.H{
-		"status":  http.StatusForbidden,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusForbidden,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
 func (c *Context) BadRequest(message string, data gin.H) {
 	c.JSON(http.StatusBadRequest, gin.H{
-		"status":  http.StatusBadRequest,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusBadRequest,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
 func (c *Context) ErrorForm(message string, data gin.H) {
 	c.JSON(http.StatusUnprocessableEntity, gin.H{
-		"status":  http.StatusUnprocessableEntity,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusUnprocessableEntity,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
 func (c *Context) NotFound(message string, data gin.H) {
 	c.JSON(http.StatusNotFound, gin.H{
-		"status":  http.StatusNotFound,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusNotFound,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 
 func (c *Context) PayRequired(message string, data gin.H) {
 	c.JSON(http.StatusPaymentRequired, gin.H{
-		"status":  http.StatusPaymentRequired,
-		"message": message,
-		"data":    data,
+		KeyStatus:  http.StatusPaymentRequired,
+		KeyMessage: message,
+		KeyData:    data,
 	})
 }
 

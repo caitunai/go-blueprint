@@ -398,6 +398,7 @@ go.work.sum
 stats.html
 *.key
 !/storage/*/*.html
+!/storage/views/errors
 !/storage/*/*.txt
 !.gitkeep
 go-blueprint

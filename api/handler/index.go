@@ -4,13 +4,19 @@ import (
 	"fmt"
 
 	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/db"
 	"github.com/gin-gonic/gin"
 )
 
 func HomePage(c *base.Context) {
-	user := c.LoginUser()
+	var user *db.User
+	if c.IsDatabaseEnabled() {
+		user = c.LoginUser()
+	}
 	if user == nil {
-		c.Forbidden("you are not login", gin.H{})
+		c.Forbidden("you are not login", gin.H{
+			"db_enabled": c.IsDatabaseEnabled(),
+		})
 	} else {
 		c.Success(gin.H{
 			"data": fmt.Sprintf("your user id is: %d", user.ID),

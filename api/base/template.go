@@ -111,11 +111,10 @@ func (r Render) getFileName(fileName string) string {
 }
 
 func (r Render) getTemplateName(fileName string) string {
-	name := "app"
 	if strings.Contains(fileName, ".") {
-		name = strings.Trim(filepath.Ext(fileName), ".")
+		return strings.Trim(filepath.Ext(fileName), ".")
 	}
-	return name
+	return ""
 }
 
 func (r Render) readLayoutFile(file string) ([]byte, error) {
@@ -137,7 +136,14 @@ func (r Render) readPageTemplateFile(file, pageName string) ([]byte, error) {
 	if err == nil {
 		tplName := r.getFileName(file)
 		tmpName := r.getTemplateName(tplName)
-		prefix := []byte("{{ define \"" + pageName + "\"}}{{ template \"" + tmpName + "\" .}}{{ end }}")
+		if tmpName == "" {
+			prefix := []byte("{{ define \"" + pageName + "\" }}")
+			suffix := []byte("{{ end }}")
+			content = append(prefix, content...)
+			content = append(content, suffix...)
+			return content, nil
+		}
+		prefix := []byte("{{ define \"" + pageName + "\" }}{{ template \"" + tmpName + "\" .}}{{ end }}")
 		content = append(prefix, content...)
 	} else {
 		err = errors.Join(err, ErrPageTemplate)

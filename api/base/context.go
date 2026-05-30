@@ -3,6 +3,7 @@ package base
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,8 +28,9 @@ const (
 // APIUser The api user information from bearer token, issuer is jwt iss attribute
 // user is jwt sub attribute
 type APIUser struct {
-	User   string `json:"user"`
-	Issuer string `json:"issuer"`
+	User      string   `json:"user"`
+	Issuer    string   `json:"issuer"`
+	TenantIDs []uint64 `json:"tenant_ids,omitempty"`
 }
 
 type Context struct {
@@ -123,7 +125,7 @@ func (c *Context) Success(data gin.H) {
 // data the data map for this response
 func (c *Context) Error(code int, message string, data gin.H) {
 	c.Header("x-error-code", strconv.Itoa(code))
-	c.JSON(http.StatusInternalServerError, gin.H{
+	c.response(http.StatusInternalServerError, gin.H{
 		KeyStatus:  code,
 		KeyMessage: message,
 		KeyData:    data,
@@ -134,7 +136,7 @@ func (c *Context) Error(code int, message string, data gin.H) {
 //
 // message the error message to response
 func (c *Context) ErrorMessage(message string) {
-	c.JSON(http.StatusInternalServerError, gin.H{
+	c.response(http.StatusInternalServerError, gin.H{
 		KeyStatus:  http.StatusInternalServerError,
 		KeyMessage: message,
 	})
@@ -145,7 +147,7 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 		"WWW-Authenticate",
 		"Bearer error=\"invalid_token\", error_description=\"The token is invalid, request with a new token\"",
 	)
-	c.JSON(http.StatusUnauthorized, gin.H{
+	c.response(http.StatusUnauthorized, gin.H{
 		KeyStatus:  http.StatusUnauthorized,
 		KeyMessage: message,
 		KeyData:    data,
@@ -153,7 +155,7 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 }
 
 func (c *Context) Forbidden(message string, data gin.H) {
-	c.JSON(http.StatusForbidden, gin.H{
+	c.response(http.StatusForbidden, gin.H{
 		KeyStatus:  http.StatusForbidden,
 		KeyMessage: message,
 		KeyData:    data,
@@ -161,7 +163,7 @@ func (c *Context) Forbidden(message string, data gin.H) {
 }
 
 func (c *Context) BadRequest(message string, data gin.H) {
-	c.JSON(http.StatusBadRequest, gin.H{
+	c.response(http.StatusBadRequest, gin.H{
 		KeyStatus:  http.StatusBadRequest,
 		KeyMessage: message,
 		KeyData:    data,
@@ -169,7 +171,7 @@ func (c *Context) BadRequest(message string, data gin.H) {
 }
 
 func (c *Context) ErrorForm(message string, data gin.H) {
-	c.JSON(http.StatusUnprocessableEntity, gin.H{
+	c.response(http.StatusUnprocessableEntity, gin.H{
 		KeyStatus:  http.StatusUnprocessableEntity,
 		KeyMessage: message,
 		KeyData:    data,
@@ -177,15 +179,92 @@ func (c *Context) ErrorForm(message string, data gin.H) {
 }
 
 func (c *Context) NotFound(message string, data gin.H) {
-	c.JSON(http.StatusNotFound, gin.H{
+	c.response(http.StatusNotFound, gin.H{
 		KeyStatus:  http.StatusNotFound,
 		KeyMessage: message,
 		KeyData:    data,
 	})
 }
 
+func (c *Context) View(name string, data gin.H) {
+	c.HTML(http.StatusOK, name, data)
+}
+
+func (c *Context) response(code int, data gin.H) {
+	if !c.WantsJSONResponse() {
+		if c.Request.Method == http.MethodHead {
+			c.Header("Content-Type", "text/html; charset=utf-8")
+			c.Status(code)
+			return
+		}
+
+		message, ok := data["message"]
+		if ok {
+			data["title"] = message
+		} else {
+			data["title"] = "unknown error"
+		}
+		c.HTML(code, "errors."+strconv.Itoa(code), data)
+		return
+	}
+	c.JSON(code, data)
+}
+
+func (c *Context) WantsJSONResponse() bool {
+	if IsDocumentFetch(c) {
+		return false
+	}
+	if strings.EqualFold(c.GetHeader("X-Requested-With"), "XMLHttpRequest") {
+		return true
+	}
+	if headerHasJSONMediaType(c.GetHeader("Accept")) {
+		return true
+	}
+	if headerHasJSONMediaType(c.GetHeader("Content-Type")) {
+		return true
+	}
+	if strings.EqualFold(c.GetHeader("Sec-Fetch-Dest"), "empty") && !headerHasHTMLMediaType(c.GetHeader("Accept")) {
+		return true
+	}
+	return false
+}
+
+func IsDocumentFetch(c *Context) bool {
+	return strings.EqualFold(c.GetHeader("Sec-Fetch-Dest"), "document") ||
+		strings.EqualFold(c.GetHeader("Sec-Fetch-Mode"), "navigate")
+}
+
+func headerHasJSONMediaType(header string) bool {
+	for mediaType := range headerMediaTypes(header) {
+		if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
+			return true
+		}
+	}
+	return false
+}
+
+func headerHasHTMLMediaType(header string) bool {
+	for mediaType := range headerMediaTypes(header) {
+		if mediaType == "text/html" {
+			return true
+		}
+	}
+	return false
+}
+
+func headerMediaTypes(header string) map[string]struct{} {
+	mediaTypes := make(map[string]struct{})
+	for _, part := range strings.Split(header, ",") {
+		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err == nil && mediaType != "" {
+			mediaTypes[strings.ToLower(mediaType)] = struct{}{}
+		}
+	}
+	return mediaTypes
+}
+
 func (c *Context) PayRequired(message string, data gin.H) {
-	c.JSON(http.StatusPaymentRequired, gin.H{
+	c.response(http.StatusPaymentRequired, gin.H{
 		KeyStatus:  http.StatusPaymentRequired,
 		KeyMessage: message,
 		KeyData:    data,

@@ -8,6 +8,7 @@ import (
 
 type Router struct {
 	*gin.RouterGroup
+	engine *gin.Engine
 }
 type Controller struct {
 	r *Router
@@ -18,6 +19,7 @@ type HandlerFunc func(c *Context)
 func NewRouter(e *gin.Engine) *Router {
 	return &Router{
 		RouterGroup: &e.RouterGroup,
+		engine:      e,
 	}
 }
 
@@ -71,10 +73,22 @@ func (r *Router) Use(handlers ...HandlerFunc) *Router {
 	return r
 }
 
+func (r *Router) NoRoute(handlers ...HandlerFunc) *Router {
+	hds := make([]gin.HandlerFunc, 0, len(handlers))
+	for _, hd := range handlers {
+		hds = append(hds, wrapHandler(hd))
+	}
+	if r.engine != nil {
+		r.engine.NoRoute(hds...)
+	}
+	return r
+}
+
 func (r *Router) Group(relativePath string, handlers ...HandlerFunc) *Router {
 	g := r.wrapRoute("group", relativePath, handlers...).(*gin.RouterGroup)
 	return &Router{
 		RouterGroup: g,
+		engine:      r.engine,
 	}
 }
 

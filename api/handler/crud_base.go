@@ -8,6 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	KeyModel = "model"
+)
+
 type IDQueryAll struct {
 	IDs []uint `form:"id[]" json:"ids" binding:"required"`
 }
@@ -42,7 +46,7 @@ func (ctrl *CrudController[M, C, U, V, S]) Create(c *base.Context) {
 		return
 	}
 	c.Success(gin.H{
-		"model": view,
+		KeyModel: view,
 	})
 }
 
@@ -55,7 +59,7 @@ func (ctrl *CrudController[M, C, U, V, S]) Get(c *base.Context) {
 		return
 	}
 	c.Success(gin.H{
-		"model": view,
+		KeyModel: view,
 	})
 }
 
@@ -90,7 +94,7 @@ func (ctrl *CrudController[M, C, U, V, S]) Update(c *base.Context) {
 		return
 	}
 	c.Success(gin.H{
-		"model": view,
+		KeyModel: view,
 	})
 }
 

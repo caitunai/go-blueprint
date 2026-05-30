@@ -28,9 +28,8 @@ const (
 // APIUser The api user information from bearer token, issuer is jwt iss attribute
 // user is jwt sub attribute
 type APIUser struct {
-	User      string   `json:"user"`
-	Issuer    string   `json:"issuer"`
-	TenantIDs []uint64 `json:"tenant_ids,omitempty"`
+	User   string `json:"user"`
+	Issuer string `json:"issuer"`
 }
 
 type Context struct {

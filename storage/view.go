@@ -6,11 +6,11 @@ import (
 	"io/fs"
 )
 
-//go:embed views ui static
+//go:embed views ui/dist static
 var FS embed.FS
 
 var (
-	UI, _     = fs.Sub(FS, "ui")
+	UI, _     = fs.Sub(FS, "ui/dist")
 	Assets, _ = fs.Sub(UI, "assets")
 	Static, _ = fs.Sub(FS, "static")
 )

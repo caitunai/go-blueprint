@@ -401,4 +401,7 @@ stats.html
 !/storage/views/errors
 !/storage/*/*.txt
 !.gitkeep
+!/storage/ui/dist/
+/storage/ui/dist/*
+!/storage/ui/dist/.gitkeep
 go-blueprint

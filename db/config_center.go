@@ -1,0 +1,649 @@
+package db
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+const (
+	MaxConfigBytes        = 512 * 1024
+	maxConfigDepth        = 32
+	maxConfigNodes        = 5000
+	maxConfigCollection   = 1000
+	maxConfigKeyLength    = 128
+	maxConfigStringLength = 64 * 1024
+	maxConfigEnvironments = 100
+	maxEnvironmentDepth   = 16
+)
+
+var (
+	ErrConfigEnvironmentNotFound = errors.New("config environment not found")
+	ErrConfigInvalid             = errors.New("invalid configuration")
+	ErrConfigEnvironmentInvalid  = errors.New("invalid config environment")
+	ErrConfigEnvironmentConflict = errors.New("config environment conflicts with existing data")
+	ErrConfigEnvironmentInUse    = errors.New("config environment is inherited by another environment")
+	ErrConfigReleaseNotFound     = errors.New("published configuration not found")
+	ErrConfigStorage             = errors.New("config storage operation failed")
+
+	environmentSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+)
+
+// ConfigEnvironment stores only the overrides owned by an environment. The
+// final configuration is resolved by merging each ancestor from root to leaf.
+type ConfigEnvironment struct {
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Name        string    `gorm:"size:100;not null" json:"name"`
+	Slug        string    `gorm:"size:64;not null;uniqueIndex" json:"slug"`
+	Description string    `gorm:"size:500;not null;default:''" json:"description"`
+	DraftConfig string    `gorm:"type:mediumtext;not null" json:"-"`
+	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	ParentID    uint      `gorm:"not null;default:0;index" json:"parent_id"`
+	Version     uint64    `gorm:"-" json:"published_version"`
+}
+
+// ConfigRelease is an immutable, fully-resolved configuration snapshot.
+type ConfigRelease struct {
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	BatchID       string    `gorm:"size:32;not null;index" json:"batch_id"`
+	Config        string    `gorm:"type:mediumtext;not null" json:"-"`
+	ID            uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnvironmentID uint      `gorm:"not null;uniqueIndex:idx_config_release_version" json:"environment_id"`
+	Version       uint64    `gorm:"not null;uniqueIndex:idx_config_release_version" json:"version"`
+}
+
+type ConfigEnvironmentInput struct {
+	Name        string
+	Slug        string
+	Description string
+	ParentID    uint
+}
+
+type ResolvedConfig struct {
+	Config      map[string]any      `json:"config"`
+	Chain       []ConfigEnvironment `json:"inheritance_chain"`
+	Environment ConfigEnvironment   `json:"environment"`
+}
+
+type PublishedConfig struct {
+	PublishedAt   time.Time      `json:"published_at"`
+	Config        map[string]any `json:"config"`
+	BatchID       string         `json:"batch_id"`
+	EnvironmentID uint           `json:"environment_id"`
+	Version       uint64         `json:"version"`
+}
+
+type ConfigPublishResult struct {
+	BatchID  string            `json:"batch_id"`
+	Releases []PublishedConfig `json:"releases"`
+}
+
+type configReleaseVersion struct {
+	EnvironmentID uint
+	Version       uint64
+}
+
+func ListConfigEnvironments(ctx context.Context) ([]ConfigEnvironment, error) {
+	return listConfigEnvironments(ctx, DB())
+}
+
+func listConfigEnvironments(ctx context.Context, conn *gorm.DB) ([]ConfigEnvironment, error) {
+	environments := make([]ConfigEnvironment, 0)
+	if err := conn.WithContext(ctx).Order("name ASC, id ASC").Find(&environments).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+
+	versions := make([]configReleaseVersion, 0)
+	if err := conn.WithContext(ctx).
+		Model(&ConfigRelease{}).
+		Select("environment_id, MAX(version) AS version").
+		Group("environment_id").
+		Scan(&versions).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	versionByEnvironment := make(map[uint]uint64, len(versions))
+	for _, version := range versions {
+		versionByEnvironment[version.EnvironmentID] = version.Version
+	}
+	for index := range environments {
+		environments[index].Version = versionByEnvironment[environments[index].ID]
+	}
+	return environments, nil
+}
+
+func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
+	input = normalizeConfigEnvironmentInput(input)
+	if err := validateConfigEnvironmentInput(input); err != nil {
+		return nil, err
+	}
+
+	var created *ConfigEnvironment
+	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&ConfigEnvironment{}).Count(&count).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if count >= maxConfigEnvironments {
+			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment limit reached"))
+		}
+		environments, err := lockedConfigEnvironments(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := validateEnvironmentParent(environments, 0, input.ParentID); err != nil {
+			return err
+		}
+		if environmentSlugExists(environments, input.Slug, 0) {
+			return ErrConfigEnvironmentConflict
+		}
+		created = &ConfigEnvironment{
+			Name:        input.Name,
+			Slug:        input.Slug,
+			Description: input.Description,
+			ParentID:    input.ParentID,
+			DraftConfig: "{}",
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return created, nil
+}
+
+func UpdateConfigEnvironment(ctx context.Context, id uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
+	input = normalizeConfigEnvironmentInput(input)
+	if id == 0 {
+		return nil, ErrConfigEnvironmentNotFound
+	}
+	if err := validateConfigEnvironmentInput(input); err != nil {
+		return nil, err
+	}
+
+	updated := &ConfigEnvironment{}
+	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		environments, err := lockedConfigEnvironments(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, exists := configEnvironmentByID(environments, id)
+		if !exists {
+			return ErrConfigEnvironmentNotFound
+		}
+		if err := validateEnvironmentParent(environments, id, input.ParentID); err != nil {
+			return err
+		}
+		if environmentSlugExists(environments, input.Slug, id) {
+			return ErrConfigEnvironmentConflict
+		}
+		changes := map[string]any{
+			"name":        input.Name,
+			"slug":        input.Slug,
+			"description": input.Description,
+			"parent_id":   input.ParentID,
+		}
+		if err := tx.Model(&ConfigEnvironment{}).Where("id = ?", id).Updates(changes).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if err := tx.First(updated, id).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return updated, nil
+}
+
+func DeleteConfigEnvironment(ctx context.Context, id uint) error {
+	if id == 0 {
+		return ErrConfigEnvironmentNotFound
+	}
+	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		environments, err := lockedConfigEnvironments(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, exists := configEnvironmentByID(environments, id); !exists {
+			return ErrConfigEnvironmentNotFound
+		}
+		for _, environment := range environments {
+			if environment.ParentID == id {
+				return ErrConfigEnvironmentInUse
+			}
+		}
+		if err := tx.Where("environment_id = ?", id).Delete(&ConfigRelease{}).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if err := tx.Delete(&ConfigEnvironment{}, id).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return errors.Join(ErrConfigStorage, err)
+	}
+	return nil
+}
+
+func SaveConfigDraft(ctx context.Context, environmentID uint, raw []byte) (*ResolvedConfig, error) {
+	config, err := DecodeConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
+	if len(encoded) > MaxConfigBytes {
+		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration is too large"))
+	}
+	result := &ResolvedConfig{}
+	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var environment ConfigEnvironment
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&environment, environmentID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.Join(ErrConfigEnvironmentNotFound, err)
+			}
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if err := tx.Model(&environment).Update("draft_config", string(encoded)).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		resolved, err := resolveConfig(ctx, tx, environmentID)
+		if err != nil {
+			return err
+		}
+		*result = *resolved
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return result, nil
+}
+
+func GetConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, map[string]any, error) {
+	resolved, err := resolveConfig(ctx, DB(), environmentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	draft, err := DecodeConfig([]byte(resolved.Environment.DraftConfig))
+	if err != nil {
+		return nil, nil, errors.Join(ErrConfigStorage, err)
+	}
+	return resolved, draft, nil
+}
+
+func ResolveConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, error) {
+	return resolveConfig(ctx, DB(), environmentID)
+}
+
+func resolveConfig(ctx context.Context, conn *gorm.DB, environmentID uint) (*ResolvedConfig, error) {
+	environments := make([]ConfigEnvironment, 0)
+	if err := conn.WithContext(ctx).Order("id ASC").Find(&environments).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return resolveConfigFromEnvironments(environments, environmentID)
+}
+
+func resolveConfigFromEnvironments(environments []ConfigEnvironment, environmentID uint) (*ResolvedConfig, error) {
+	byID := make(map[uint]ConfigEnvironment, len(environments))
+	for _, environment := range environments {
+		byID[environment.ID] = environment
+	}
+	target, exists := byID[environmentID]
+	if !exists {
+		return nil, ErrConfigEnvironmentNotFound
+	}
+
+	chain := make([]ConfigEnvironment, 0, maxEnvironmentDepth)
+	visited := make(map[uint]struct{}, maxEnvironmentDepth)
+	current := target
+	for {
+		if _, duplicate := visited[current.ID]; duplicate {
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance cycle detected"))
+		}
+		visited[current.ID] = struct{}{}
+		chain = append(chain, current)
+		if len(chain) > maxEnvironmentDepth {
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance is too deep"))
+		}
+		if current.ParentID == 0 {
+			break
+		}
+		parent, found := byID[current.ParentID]
+		if !found {
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+		}
+		current = parent
+	}
+	slices.Reverse(chain)
+
+	finalConfig := make(map[string]any)
+	for _, environment := range chain {
+		draft, err := DecodeConfig([]byte(environment.DraftConfig))
+		if err != nil {
+			return nil, errors.Join(ErrConfigStorage, err)
+		}
+		finalConfig = mergeConfig(finalConfig, draft).(map[string]any)
+	}
+	return &ResolvedConfig{Environment: target, Chain: chain, Config: finalConfig}, nil
+}
+
+func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishResult, error) {
+	ids := uniqueSortedIDs(environmentIDs)
+	if len(ids) == 0 || len(ids) > maxConfigEnvironments {
+		return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("select between 1 and 100 environments"))
+	}
+	batchID, err := newConfigBatchID()
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	result := &ConfigPublishResult{BatchID: batchID, Releases: make([]PublishedConfig, 0, len(ids))}
+	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		environments, err := lockedConfigEnvironments(ctx, tx)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, exists := configEnvironmentByID(environments, id); !exists {
+				return ErrConfigEnvironmentNotFound
+			}
+		}
+		for _, id := range ids {
+			resolved, err := resolveConfigFromEnvironments(environments, id)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.Marshal(resolved.Config)
+			if err != nil {
+				return errors.Join(ErrConfigInvalid, err)
+			}
+			var latest uint64
+			if err := tx.Model(&ConfigRelease{}).
+				Where("environment_id = ?", id).
+				Select("COALESCE(MAX(version), 0)").
+				Scan(&latest).Error; err != nil {
+				return errors.Join(ErrConfigStorage, err)
+			}
+			release := &ConfigRelease{
+				EnvironmentID: id,
+				BatchID:       batchID,
+				Version:       latest + 1,
+				Config:        string(encoded),
+			}
+			if err := tx.Create(release).Error; err != nil {
+				return errors.Join(ErrConfigStorage, err)
+			}
+			result.Releases = append(result.Releases, PublishedConfig{
+				EnvironmentID: id,
+				BatchID:       batchID,
+				Version:       release.Version,
+				Config:        resolved.Config,
+				PublishedAt:   release.CreatedAt,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return result, nil
+}
+
+func LatestPublishedConfig(ctx context.Context, environmentID uint) (*PublishedConfig, error) {
+	var release ConfigRelease
+	err := DB().WithContext(ctx).
+		Where("environment_id = ?", environmentID).
+		Order("version DESC").
+		First(&release).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.Join(ErrConfigReleaseNotFound, err)
+		}
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	config, err := DecodeConfig([]byte(release.Config))
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return &PublishedConfig{
+		EnvironmentID: environmentID,
+		BatchID:       release.BatchID,
+		Version:       release.Version,
+		Config:        config,
+		PublishedAt:   release.CreatedAt,
+	}, nil
+}
+
+func DecodeConfig(raw []byte) (map[string]any, error) {
+	if len(raw) == 0 || len(raw) > MaxConfigBytes {
+		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration size is invalid"))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var config map[string]any
+	if err := decoder.Decode(&config); err != nil {
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
+	if config == nil {
+		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration root must be an object"))
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("configuration contains multiple JSON values")
+		}
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
+	nodes := 0
+	if err := validateConfigValue(config, 1, &nodes); err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+func validateConfigValue(value any, depth int, nodes *int) error {
+	(*nodes)++
+	if depth > maxConfigDepth {
+		return errors.Join(ErrConfigInvalid, errors.New("configuration nesting is too deep"))
+	}
+	if *nodes > maxConfigNodes {
+		return errors.Join(ErrConfigInvalid, errors.New("configuration contains too many values"))
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) > maxConfigCollection {
+			return errors.Join(ErrConfigInvalid, errors.New("configuration object contains too many fields"))
+		}
+		for key, child := range typed {
+			if strings.TrimSpace(key) == "" || len(key) > maxConfigKeyLength {
+				return errors.Join(ErrConfigInvalid, errors.New("configuration key is invalid"))
+			}
+			if err := validateConfigValue(child, depth+1, nodes); err != nil {
+				return err
+			}
+		}
+	case []any:
+		if len(typed) > maxConfigCollection {
+			return errors.Join(ErrConfigInvalid, errors.New("configuration array contains too many items"))
+		}
+		for _, child := range typed {
+			if err := validateConfigValue(child, depth+1, nodes); err != nil {
+				return err
+			}
+		}
+	case string:
+		if len(typed) > maxConfigStringLength {
+			return errors.Join(ErrConfigInvalid, errors.New("configuration string is too long"))
+		}
+	case bool, json.Number:
+		return nil
+	default:
+		return errors.Join(ErrConfigInvalid, errors.New("configuration contains an unsupported value type"))
+	}
+	return nil
+}
+
+func mergeConfig(base, override any) any {
+	baseObject, baseIsObject := base.(map[string]any)
+	overrideObject, overrideIsObject := override.(map[string]any)
+	if !baseIsObject || !overrideIsObject {
+		return cloneConfigValue(override)
+	}
+	merged := make(map[string]any, len(baseObject)+len(overrideObject))
+	for key, value := range baseObject {
+		merged[key] = cloneConfigValue(value)
+	}
+	for key, value := range overrideObject {
+		if inherited, exists := merged[key]; exists {
+			merged[key] = mergeConfig(inherited, value)
+		} else {
+			merged[key] = cloneConfigValue(value)
+		}
+	}
+	return merged
+}
+
+func cloneConfigValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, child := range typed {
+			cloned[key] = cloneConfigValue(child)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, child := range typed {
+			cloned[index] = cloneConfigValue(child)
+		}
+		return cloned
+	default:
+		return typed
+	}
+}
+
+func normalizeConfigEnvironmentInput(input ConfigEnvironmentInput) ConfigEnvironmentInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Slug = strings.ToLower(strings.TrimSpace(input.Slug))
+	input.Description = strings.TrimSpace(input.Description)
+	return input
+}
+
+func validateConfigEnvironmentInput(input ConfigEnvironmentInput) error {
+	if input.Name == "" || len(input.Name) > 100 {
+		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment name must contain 1 to 100 characters"))
+	}
+	if !environmentSlugPattern.MatchString(input.Slug) {
+		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores"))
+	}
+	if len(input.Description) > 500 {
+		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment description is too long"))
+	}
+	return nil
+}
+
+func lockedConfigEnvironments(ctx context.Context, tx *gorm.DB) ([]ConfigEnvironment, error) {
+	environments := make([]ConfigEnvironment, 0)
+	if err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("id ASC").
+		Find(&environments).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return environments, nil
+}
+
+func validateEnvironmentParent(environments []ConfigEnvironment, environmentID, parentID uint) error {
+	if parentID == 0 {
+		return nil
+	}
+	if parentID == environmentID {
+		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("an environment cannot inherit from itself"))
+	}
+	byID := make(map[uint]ConfigEnvironment, len(environments))
+	for _, environment := range environments {
+		byID[environment.ID] = environment
+	}
+	parent, exists := byID[parentID]
+	if !exists {
+		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+	}
+	visited := map[uint]struct{}{environmentID: {}}
+	for depth := 1; ; depth++ {
+		if depth > maxEnvironmentDepth {
+			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance is too deep"))
+		}
+		if _, duplicate := visited[parent.ID]; duplicate {
+			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance cycle detected"))
+		}
+		visited[parent.ID] = struct{}{}
+		if parent.ParentID == 0 {
+			return nil
+		}
+		parent, exists = byID[parent.ParentID]
+		if !exists {
+			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+		}
+	}
+}
+
+func configEnvironmentByID(environments []ConfigEnvironment, id uint) (ConfigEnvironment, bool) {
+	for _, environment := range environments {
+		if environment.ID == id {
+			return environment, true
+		}
+	}
+	return ConfigEnvironment{}, false
+}
+
+func environmentSlugExists(environments []ConfigEnvironment, slug string, exceptID uint) bool {
+	for _, environment := range environments {
+		if environment.ID != exceptID && environment.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueSortedIDs(ids []uint) []uint {
+	unique := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	result := make([]uint, 0, len(unique))
+	for id := range unique {
+		result = append(result, id)
+	}
+	slices.Sort(result)
+	return result
+}
+
+func newConfigBatchID() (string, error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", errors.Join(ErrConfigStorage, err)
+	}
+	return hex.EncodeToString(random), nil
+}

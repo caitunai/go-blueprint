@@ -10,6 +10,7 @@ import (
 
 const (
 	KeyModel = "model"
+	KeyError = "error"
 )
 
 type IDQueryAll struct {
@@ -55,7 +56,7 @@ func (ctrl *CrudController[M, C, U, V, S]) Get(c *base.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	view, err := ctrl.Service.Get(c, uint(id))
 	if err != nil {
-		c.NotFound(err.Error(), gin.H{"error": "not found"})
+		c.NotFound(err.Error(), gin.H{KeyError: "not found"})
 		return
 	}
 	c.Success(gin.H{
@@ -72,7 +73,7 @@ func (ctrl *CrudController[M, C, U, V, S]) GetAll(c *base.Context) {
 	}
 	view, err := ctrl.Service.GetAll(c, q.IDs)
 	if err != nil {
-		c.NotFound(err.Error(), gin.H{"error": "not found"})
+		c.NotFound(err.Error(), gin.H{KeyError: "not found"})
 		return
 	}
 	c.Success(gin.H{

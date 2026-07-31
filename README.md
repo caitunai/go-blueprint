@@ -64,8 +64,33 @@ git commit -m "commit_message"
 
 ## Build to release
 ```shell
+cd storage/ui
+npm ci
+npm run build
+cd ../..
 GOOS=linux GOARCH=amd64 go build
 ```
+
+## Configuration Center
+
+The built-in configuration center is available at `/config-center` and does not
+require authentication. It supports visual editing for objects, arrays,
+strings, booleans, and JSON numbers. Environments can inherit
+from one parent environment; objects merge recursively, while arrays and scalar
+values replace the inherited value.
+
+Configuration edits are saved as drafts. Use the multi-environment publish
+action to create immutable, fully resolved snapshots in one database
+transaction. Apply the Atlas migrations before first use:
+
+```shell
+atlas migrate apply --env local
+```
+
+For Vite hot reload, set `ui.assetMode="vite"`, run `npm run dev` in
+`storage/ui`, and keep `ui.viteDevOrigin` aligned with the Vite origin. Release
+builds must run the frontend build before compiling the Go binary because the
+generated manifest and assets are embedded by `storage/view.go`.
 
 Absolutely! Here’s the **updated README tutorial** including Atlas installation instructions:
 

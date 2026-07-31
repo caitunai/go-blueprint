@@ -15,6 +15,8 @@ func InitRoute(r *base.Router) {
 
 func initPackageHandler(r *base.Router) {
 	r.GET("/", handler.HomePage)
+	r.GET("/config-center", handler.ConfigCenterPage)
+	handler.ConfigCenterControl(r.Group("/config-center/api"))
 
 	r.GET("/assets/*filepath", handler.ServeAssetFile)
 	r.HEAD("/assets/*filepath", handler.ServeAssetFile)

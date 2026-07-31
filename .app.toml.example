@@ -3,6 +3,10 @@ mode="dev"
 url="http://localhost:8080"
 key="key_must_length_32"
 
+[ui]
+assetMode="embedded"
+viteDevOrigin="http://127.0.0.1:5173"
+
 [logger]
 level="info"
 

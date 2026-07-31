@@ -26,7 +26,7 @@ type ManifestNode struct {
 type Manifest map[string]*ManifestNode
 
 func ParseManifest() Manifest {
-	file, err := FS.ReadFile("ui/manifest.json")
+	file, err := FS.ReadFile("ui/dist/manifest.json")
 	if err != nil {
 		return nil
 	}

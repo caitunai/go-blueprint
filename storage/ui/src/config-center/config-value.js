@@ -71,23 +71,12 @@ export function buildEnvironmentDisplayTree(environments) {
     hasPrevious: true,
   }));
 
-  return [
-    {
-      environment: {
-        id: "config-root",
-        name: "配置根环境",
-        slug: "",
-        parent_id: 0,
-      },
-      depth: 0,
-      ancestorContinuations: [],
-      isLast: true,
-      hasChildren: true,
-      hasPrevious: false,
-      virtual: true,
-    },
-    ...environmentRows,
-  ];
+  return [environmentRootRow(), ...environmentRows];
+}
+
+export function buildParentEnvironmentTree(environments) {
+  const rows = buildEnvironmentDisplayTree(environments);
+  return rows.length ? rows : [environmentRootRow()];
 }
 
 export function formatEnvironmentTreeLabel(row) {
@@ -97,6 +86,68 @@ export function formatEnvironmentTreeLabel(row) {
     .join("");
   const branch = row.depth === 0 ? "● " : row.isLast ? "└─● " : "├─● ";
   return `${ancestorLines}${branch}${row.environment.name}（${row.environment.slug}）`;
+}
+
+export function buildComparisonSourceRows(environments, releases) {
+  const releasesByEnvironment = new Map();
+  releases.forEach((release) => {
+    const environmentReleases = releasesByEnvironment.get(release.environment_id) ?? [];
+    environmentReleases.push(release);
+    releasesByEnvironment.set(release.environment_id, environmentReleases);
+  });
+  releasesByEnvironment.forEach((environmentReleases) => {
+    environmentReleases.sort((left, right) => right.version - left.version);
+  });
+
+  return buildEnvironmentDisplayTree(environments).map((row) => {
+    const environmentReleases = releasesByEnvironment.get(row.environment.id) ?? [];
+    const showDraft = row.environment.has_draft !== false || environmentReleases.length === 0;
+    return {
+      ...row,
+      sources: row.virtual ? [] : [
+        ...(showDraft ? [{
+          value: `draft:${row.environment.id}`,
+          label: "当前草稿",
+          fullLabel: `${row.environment.name}（${row.environment.slug}） · 当前草稿`,
+        }] : []),
+        ...environmentReleases.map((release) => ({
+          value: `release:${row.environment.id}:${release.version}`,
+          label: `已发布 v${release.version}`,
+          fullLabel: `${row.environment.name}（${row.environment.slug}） · 已发布 v${release.version}`,
+          release,
+        })),
+      ],
+    };
+  });
+}
+
+export function defaultComparisonSources(environments, currentEnvironmentID, releases) {
+  const current = environments.find((environment) => environment.id === currentEnvironmentID);
+  if (!current) return { left: "", right: "" };
+
+  const right = preferredComparisonSource(current, releases);
+  if (current.parent_id) {
+    const parent = environments.find((environment) => environment.id === current.parent_id);
+    return { left: preferredComparisonSource(parent, releases), right };
+  }
+
+  const siblings = environments
+    .filter((environment) => environment.parent_id === current.parent_id && environment.id !== current.id)
+    .sort((left, rightEnvironment) => left.name.localeCompare(rightEnvironment.name, "zh-CN"));
+  if (siblings.length) {
+    return { left: preferredComparisonSource(siblings[0], releases), right };
+  }
+
+  return { left: right, right };
+}
+
+function preferredComparisonSource(environment, releases) {
+  if (!environment) return "";
+  const latestRelease = releases
+    .filter((release) => release.environment_id === environment.id)
+    .sort((left, right) => right.version - left.version)[0];
+  if (environment.has_draft !== false || !latestRelease) return `draft:${environment.id}`;
+  return `release:${environment.id}:${latestRelease.version}`;
 }
 
 export class ConfigTypeMemory {
@@ -125,4 +176,21 @@ export class ConfigTypeMemory {
 
 function isPlainConfigObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function environmentRootRow() {
+  return {
+    environment: {
+      id: "config-root",
+      name: "配置根环境",
+      slug: "",
+      parent_id: 0,
+    },
+    depth: 0,
+    ancestorContinuations: [],
+    isLast: true,
+    hasChildren: true,
+    hasPrevious: false,
+    virtual: true,
+  };
 }

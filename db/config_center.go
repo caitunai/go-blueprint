@@ -10,6 +10,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,14 +19,16 @@ import (
 )
 
 const (
-	MaxConfigBytes        = 512 * 1024
-	maxConfigDepth        = 32
-	maxConfigNodes        = 5000
-	maxConfigCollection   = 1000
-	maxConfigKeyLength    = 128
-	maxConfigStringLength = 64 * 1024
-	maxConfigEnvironments = 100
-	maxEnvironmentDepth   = 16
+	MaxConfigBytes             = 512 * 1024
+	MaxConfigDescriptionBytes  = 512 * 1024
+	maxConfigDepth             = 32
+	maxConfigNodes             = 5000
+	maxConfigCollection        = 1000
+	maxConfigKeyLength         = 128
+	maxConfigStringLength      = 64 * 1024
+	maxConfigDescriptionLength = 2000
+	maxConfigEnvironments      = 100
+	maxEnvironmentDepth        = 16
 )
 
 var (
@@ -43,15 +46,17 @@ var (
 // ConfigEnvironment stores only the overrides owned by an environment. The
 // final configuration is resolved by merging each ancestor from root to leaf.
 type ConfigEnvironment struct {
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Name        string    `gorm:"size:100;not null" json:"name"`
-	Slug        string    `gorm:"size:64;not null;uniqueIndex" json:"slug"`
-	Description string    `gorm:"size:500;not null;default:''" json:"description"`
-	DraftConfig string    `gorm:"type:mediumtext;not null" json:"-"`
-	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	ParentID    uint      `gorm:"not null;default:0;index" json:"parent_id"`
-	Version     uint64    `gorm:"-" json:"published_version"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	Name              string    `gorm:"size:100;not null" json:"name"`
+	Slug              string    `gorm:"size:64;not null;uniqueIndex" json:"slug"`
+	Description       string    `gorm:"size:500;not null;default:''" json:"description"`
+	DraftConfig       string    `gorm:"type:mediumtext;not null" json:"-"`
+	DraftDescriptions string    `gorm:"type:mediumtext;not null" json:"-"`
+	ID                uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	ParentID          uint      `gorm:"not null;default:0;index" json:"parent_id"`
+	Version           uint64    `gorm:"-" json:"published_version"`
+	HasDraft          bool      `gorm:"-" json:"has_draft"`
 }
 
 // ConfigRelease is an immutable, fully-resolved configuration snapshot.
@@ -60,6 +65,7 @@ type ConfigRelease struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	BatchID       string    `gorm:"size:32;not null;index" json:"batch_id"`
 	Config        string    `gorm:"type:mediumtext;not null" json:"-"`
+	Descriptions  string    `gorm:"type:mediumtext;not null" json:"-"`
 	ID            uint      `gorm:"primaryKey;autoIncrement" json:"id"`
 	EnvironmentID uint      `gorm:"not null;uniqueIndex:idx_config_release_version" json:"environment_id"`
 	Version       uint64    `gorm:"not null;uniqueIndex:idx_config_release_version" json:"version"`
@@ -73,27 +79,33 @@ type ConfigEnvironmentInput struct {
 }
 
 type ResolvedConfig struct {
-	Config      map[string]any      `json:"config"`
-	Chain       []ConfigEnvironment `json:"inheritance_chain"`
-	Environment ConfigEnvironment   `json:"environment"`
+	Config       map[string]any      `json:"config"`
+	Descriptions ConfigDescriptions  `json:"descriptions"`
+	Chain        []ConfigEnvironment `json:"inheritance_chain"`
+	Environment  ConfigEnvironment   `json:"environment"`
 }
 
 type PublishedConfig struct {
-	PublishedAt   time.Time      `json:"published_at"`
-	Config        map[string]any `json:"config"`
-	BatchID       string         `json:"batch_id"`
-	EnvironmentID uint           `json:"environment_id"`
-	Version       uint64         `json:"version"`
+	PublishedAt   time.Time          `json:"published_at"`
+	Config        map[string]any     `json:"config"`
+	Descriptions  ConfigDescriptions `json:"descriptions"`
+	BatchID       string             `json:"batch_id"`
+	EnvironmentID uint               `json:"environment_id"`
+	Version       uint64             `json:"version"`
+}
+
+type ConfigDescriptions map[string]string
+
+type ConfigReleaseSummary struct {
+	PublishedAt   time.Time `json:"published_at"`
+	BatchID       string    `json:"batch_id"`
+	EnvironmentID uint      `json:"environment_id"`
+	Version       uint64    `json:"version"`
 }
 
 type ConfigPublishResult struct {
 	BatchID  string            `json:"batch_id"`
 	Releases []PublishedConfig `json:"releases"`
-}
-
-type configReleaseVersion struct {
-	EnvironmentID uint
-	Version       uint64
 }
 
 func ListConfigEnvironments(ctx context.Context) ([]ConfigEnvironment, error) {
@@ -106,22 +118,48 @@ func listConfigEnvironments(ctx context.Context, conn *gorm.DB) ([]ConfigEnviron
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 
-	versions := make([]configReleaseVersion, 0)
-	if err := conn.WithContext(ctx).
+	latestVersions := conn.WithContext(ctx).
 		Model(&ConfigRelease{}).
 		Select("environment_id, MAX(version) AS version").
-		Group("environment_id").
-		Scan(&versions).Error; err != nil {
+		Group("environment_id")
+	latestReleases := make([]ConfigRelease, 0)
+	if err := conn.WithContext(ctx).
+		Where("(environment_id, version) IN (?)", latestVersions).
+		Find(&latestReleases).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
-	versionByEnvironment := make(map[uint]uint64, len(versions))
-	for _, version := range versions {
-		versionByEnvironment[version.EnvironmentID] = version.Version
-	}
-	for index := range environments {
-		environments[index].Version = versionByEnvironment[environments[index].ID]
+	if err := applyConfigEnvironmentReleaseState(environments, latestReleases); err != nil {
+		return nil, err
 	}
 	return environments, nil
+}
+
+func applyConfigEnvironmentReleaseState(environments []ConfigEnvironment, releases []ConfigRelease) error {
+	latestByEnvironment := make(map[uint]ConfigRelease, len(releases))
+	for _, release := range releases {
+		latest, exists := latestByEnvironment[release.EnvironmentID]
+		if !exists || release.Version > latest.Version {
+			latestByEnvironment[release.EnvironmentID] = release
+		}
+	}
+	for index := range environments {
+		release, published := latestByEnvironment[environments[index].ID]
+		if !published {
+			environments[index].HasDraft = true
+			continue
+		}
+		resolved, err := resolveConfigFromEnvironments(environments, environments[index].ID)
+		if err != nil {
+			return err
+		}
+		config, descriptions, err := encodeResolvedConfig(resolved)
+		if err != nil {
+			return err
+		}
+		environments[index].Version = release.Version
+		environments[index].HasDraft = config != release.Config || descriptions != release.Descriptions
+	}
+	return nil
 }
 
 func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
@@ -150,11 +188,12 @@ func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) 
 			return ErrConfigEnvironmentConflict
 		}
 		created = &ConfigEnvironment{
-			Name:        input.Name,
-			Slug:        input.Slug,
-			Description: input.Description,
-			ParentID:    input.ParentID,
-			DraftConfig: "{}",
+			Name:              input.Name,
+			Slug:              input.Slug,
+			Description:       input.Description,
+			ParentID:          input.ParentID,
+			DraftConfig:       "{}",
+			DraftDescriptions: "{}",
 		}
 		if err := tx.Create(created).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
@@ -243,7 +282,7 @@ func DeleteConfigEnvironment(ctx context.Context, id uint) error {
 	return nil
 }
 
-func SaveConfigDraft(ctx context.Context, environmentID uint, raw []byte) (*ResolvedConfig, error) {
+func SaveConfigDraft(ctx context.Context, environmentID uint, raw, rawDescriptions []byte) (*ResolvedConfig, error) {
 	config, err := DecodeConfig(raw)
 	if err != nil {
 		return nil, err
@@ -255,6 +294,14 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw []byte) (*Reso
 	if len(encoded) > MaxConfigBytes {
 		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration is too large"))
 	}
+	descriptions, err := DecodeConfigDescriptions(rawDescriptions, config)
+	if err != nil {
+		return nil, err
+	}
+	encodedDescriptions, err := json.Marshal(descriptions)
+	if err != nil {
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
 	result := &ResolvedConfig{}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var environment ConfigEnvironment
@@ -264,7 +311,11 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw []byte) (*Reso
 			}
 			return errors.Join(ErrConfigStorage, err)
 		}
-		if err := tx.Model(&environment).Update("draft_config", string(encoded)).Error; err != nil {
+		changes := map[string]any{
+			"draft_config":       string(encoded),
+			"draft_descriptions": string(encodedDescriptions),
+		}
+		if err := tx.Model(&environment).Updates(changes).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
 		resolved, err := resolveConfig(ctx, tx, environmentID)
@@ -280,16 +331,20 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw []byte) (*Reso
 	return result, nil
 }
 
-func GetConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, map[string]any, error) {
+func GetConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, map[string]any, ConfigDescriptions, error) {
 	resolved, err := resolveConfig(ctx, DB(), environmentID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	draft, err := DecodeConfig([]byte(resolved.Environment.DraftConfig))
 	if err != nil {
-		return nil, nil, errors.Join(ErrConfigStorage, err)
+		return nil, nil, nil, errors.Join(ErrConfigStorage, err)
 	}
-	return resolved, draft, nil
+	descriptions, err := DecodeConfigDescriptions([]byte(resolved.Environment.DraftDescriptions), draft)
+	if err != nil {
+		return nil, nil, nil, errors.Join(ErrConfigStorage, err)
+	}
+	return resolved, draft, descriptions, nil
 }
 
 func ResolveConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, error) {
@@ -338,14 +393,32 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 	slices.Reverse(chain)
 
 	finalConfig := make(map[string]any)
+	finalDescriptions := make(ConfigDescriptions)
 	for _, environment := range chain {
 		draft, err := DecodeConfig([]byte(environment.DraftConfig))
 		if err != nil {
 			return nil, errors.Join(ErrConfigStorage, err)
 		}
-		finalConfig = mergeConfig(finalConfig, draft).(map[string]any)
+		descriptions, err := DecodeConfigDescriptions([]byte(environment.DraftDescriptions), draft)
+		if err != nil {
+			return nil, errors.Join(ErrConfigStorage, err)
+		}
+		merged, mergedDescriptions := mergeConfigWithDescriptions(
+			finalConfig,
+			finalDescriptions,
+			draft,
+			descriptions,
+			"",
+		)
+		finalConfig = merged.(map[string]any)
+		finalDescriptions = mergedDescriptions
 	}
-	return &ResolvedConfig{Environment: target, Chain: chain, Config: finalConfig}, nil
+	return &ResolvedConfig{
+		Environment:  target,
+		Chain:        chain,
+		Config:       finalConfig,
+		Descriptions: finalDescriptions,
+	}, nil
 }
 
 func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishResult, error) {
@@ -373,9 +446,9 @@ func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishR
 			if err != nil {
 				return err
 			}
-			encoded, err := json.Marshal(resolved.Config)
+			encoded, encodedDescriptions, err := encodeResolvedConfig(resolved)
 			if err != nil {
-				return errors.Join(ErrConfigInvalid, err)
+				return err
 			}
 			var latest uint64
 			if err := tx.Model(&ConfigRelease{}).
@@ -388,7 +461,8 @@ func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishR
 				EnvironmentID: id,
 				BatchID:       batchID,
 				Version:       latest + 1,
-				Config:        string(encoded),
+				Config:        encoded,
+				Descriptions:  encodedDescriptions,
 			}
 			if err := tx.Create(release).Error; err != nil {
 				return errors.Join(ErrConfigStorage, err)
@@ -398,6 +472,7 @@ func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishR
 				BatchID:       batchID,
 				Version:       release.Version,
 				Config:        resolved.Config,
+				Descriptions:  resolved.Descriptions,
 				PublishedAt:   release.CreatedAt,
 			})
 		}
@@ -407,6 +482,18 @@ func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishR
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	return result, nil
+}
+
+func encodeResolvedConfig(resolved *ResolvedConfig) (string, string, error) {
+	encoded, err := json.Marshal(resolved.Config)
+	if err != nil {
+		return "", "", errors.Join(ErrConfigInvalid, err)
+	}
+	encodedDescriptions, err := json.Marshal(resolved.Descriptions)
+	if err != nil {
+		return "", "", errors.Join(ErrConfigInvalid, err)
+	}
+	return string(encoded), string(encodedDescriptions), nil
 }
 
 func LatestPublishedConfig(ctx context.Context, environmentID uint) (*PublishedConfig, error) {
@@ -421,15 +508,76 @@ func LatestPublishedConfig(ctx context.Context, environmentID uint) (*PublishedC
 		}
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
+	return publishedConfigFromRelease(release)
+}
+
+func PublishedConfigVersion(ctx context.Context, environmentID uint, version uint64) (*PublishedConfig, error) {
+	if environmentID == 0 || version == 0 {
+		return nil, ErrConfigReleaseNotFound
+	}
+	var release ConfigRelease
+	err := DB().WithContext(ctx).
+		Where("environment_id = ? AND version = ?", environmentID, version).
+		First(&release).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.Join(ErrConfigReleaseNotFound, err)
+		}
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return publishedConfigFromRelease(release)
+}
+
+func ListConfigReleases(ctx context.Context, environmentID uint) ([]ConfigReleaseSummary, error) {
+	if environmentID == 0 {
+		return nil, ErrConfigEnvironmentNotFound
+	}
+	var count int64
+	if err := DB().WithContext(ctx).Model(&ConfigEnvironment{}).Where("id = ?", environmentID).Count(&count).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	if count == 0 {
+		return nil, ErrConfigEnvironmentNotFound
+	}
+	releases := make([]ConfigReleaseSummary, 0)
+	if err := DB().WithContext(ctx).
+		Model(&ConfigRelease{}).
+		Select("environment_id, batch_id, version, created_at AS published_at").
+		Where("environment_id = ?", environmentID).
+		Order("version DESC").
+		Scan(&releases).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return releases, nil
+}
+
+func ListAllConfigReleases(ctx context.Context) ([]ConfigReleaseSummary, error) {
+	releases := make([]ConfigReleaseSummary, 0)
+	if err := DB().WithContext(ctx).
+		Model(&ConfigRelease{}).
+		Select("environment_id, batch_id, version, created_at AS published_at").
+		Order("environment_id ASC, version DESC").
+		Scan(&releases).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return releases, nil
+}
+
+func publishedConfigFromRelease(release ConfigRelease) (*PublishedConfig, error) {
 	config, err := DecodeConfig([]byte(release.Config))
 	if err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
+	descriptions, err := DecodeConfigDescriptions([]byte(release.Descriptions), config)
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
 	return &PublishedConfig{
-		EnvironmentID: environmentID,
+		EnvironmentID: release.EnvironmentID,
 		BatchID:       release.BatchID,
 		Version:       release.Version,
 		Config:        config,
+		Descriptions:  descriptions,
 		PublishedAt:   release.CreatedAt,
 	}, nil
 }
@@ -459,6 +607,49 @@ func DecodeConfig(raw []byte) (map[string]any, error) {
 		return nil, err
 	}
 	return config, nil
+}
+
+func DecodeConfigDescriptions(raw []byte, config map[string]any) (ConfigDescriptions, error) {
+	if len(raw) == 0 {
+		return make(ConfigDescriptions), nil
+	}
+	if len(raw) > MaxConfigDescriptionBytes {
+		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration descriptions are too large"))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var descriptions ConfigDescriptions
+	if err := decoder.Decode(&descriptions); err != nil {
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
+	if descriptions == nil {
+		descriptions = make(ConfigDescriptions)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("configuration descriptions contain multiple JSON values")
+		}
+		return nil, errors.Join(ErrConfigInvalid, err)
+	}
+	if len(descriptions) > maxConfigNodes {
+		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration contains too many descriptions"))
+	}
+	normalized := make(ConfigDescriptions, len(descriptions))
+	for pointer, description := range descriptions {
+		description = strings.TrimSpace(description)
+		if description == "" {
+			continue
+		}
+		if len(description) > maxConfigDescriptionLength {
+			return nil, errors.Join(ErrConfigInvalid, errors.New("configuration description is too long"))
+		}
+		path, err := parseJSONPointer(pointer)
+		if err != nil || !configPathExists(config, path) {
+			return nil, errors.Join(ErrConfigInvalid, errors.New("configuration description path is invalid"))
+		}
+		normalized[pointer] = description
+	}
+	return normalized, nil
 }
 
 func validateConfigValue(value any, depth int, nodes *int) error {
@@ -521,6 +712,131 @@ func mergeConfig(base, override any) any {
 		}
 	}
 	return merged
+}
+
+func mergeConfigWithDescriptions(
+	base any,
+	baseDescriptions ConfigDescriptions,
+	override any,
+	overrideDescriptions ConfigDescriptions,
+	pointer string,
+) (any, ConfigDescriptions) {
+	mergedDescriptions := cloneConfigDescriptions(baseDescriptions)
+	baseObject, baseIsObject := base.(map[string]any)
+	overrideObject, overrideIsObject := override.(map[string]any)
+	if !baseIsObject || !overrideIsObject {
+		removeDescriptionSubtree(mergedDescriptions, pointer)
+		copyDescriptionSubtree(mergedDescriptions, overrideDescriptions, pointer)
+		return cloneConfigValue(override), mergedDescriptions
+	}
+
+	merged := make(map[string]any, len(baseObject)+len(overrideObject))
+	for key, value := range baseObject {
+		merged[key] = cloneConfigValue(value)
+	}
+	if description, exists := overrideDescriptions[pointer]; exists && pointer != "" {
+		mergedDescriptions[pointer] = description
+	}
+	for key, value := range overrideObject {
+		childPointer := appendJSONPointer(pointer, key)
+		if inherited, exists := merged[key]; exists {
+			merged[key], mergedDescriptions = mergeConfigWithDescriptions(
+				inherited,
+				mergedDescriptions,
+				value,
+				overrideDescriptions,
+				childPointer,
+			)
+			continue
+		}
+		merged[key] = cloneConfigValue(value)
+		copyDescriptionSubtree(mergedDescriptions, overrideDescriptions, childPointer)
+	}
+	return merged, mergedDescriptions
+}
+
+func parseJSONPointer(pointer string) ([]string, error) {
+	if pointer == "" || !strings.HasPrefix(pointer, "/") {
+		return nil, errors.New("JSON pointer must identify a configuration item")
+	}
+	encodedSegments := strings.Split(pointer[1:], "/")
+	segments := make([]string, len(encodedSegments))
+	for index, encoded := range encodedSegments {
+		var builder strings.Builder
+		for position := 0; position < len(encoded); position++ {
+			if encoded[position] != '~' {
+				builder.WriteByte(encoded[position])
+				continue
+			}
+			if position+1 >= len(encoded) || (encoded[position+1] != '0' && encoded[position+1] != '1') {
+				return nil, errors.New("JSON pointer contains an invalid escape")
+			}
+			position++
+			if encoded[position] == '0' {
+				builder.WriteByte('~')
+			} else {
+				builder.WriteByte('/')
+			}
+		}
+		segments[index] = builder.String()
+	}
+	return segments, nil
+}
+
+func configPathExists(config map[string]any, path []string) bool {
+	var current any = config
+	for _, segment := range path {
+		switch typed := current.(type) {
+		case map[string]any:
+			var exists bool
+			current, exists = typed[segment]
+			if !exists {
+				return false
+			}
+		case []any:
+			index, err := strconv.Atoi(segment)
+			if err != nil || index < 0 || index >= len(typed) || strconv.Itoa(index) != segment {
+				return false
+			}
+			current = typed[index]
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func appendJSONPointer(pointer, segment string) string {
+	escaped := strings.ReplaceAll(strings.ReplaceAll(segment, "~", "~0"), "/", "~1")
+	return pointer + "/" + escaped
+}
+
+func cloneConfigDescriptions(descriptions ConfigDescriptions) ConfigDescriptions {
+	cloned := make(ConfigDescriptions, len(descriptions))
+	for pointer, description := range descriptions {
+		cloned[pointer] = description
+	}
+	return cloned
+}
+
+func removeDescriptionSubtree(descriptions ConfigDescriptions, pointer string) {
+	if pointer == "" {
+		clear(descriptions)
+		return
+	}
+	for candidate := range descriptions {
+		if candidate == pointer || strings.HasPrefix(candidate, pointer+"/") {
+			delete(descriptions, candidate)
+		}
+	}
+}
+
+func copyDescriptionSubtree(target, source ConfigDescriptions, pointer string) {
+	for candidate, description := range source {
+		if pointer == "" || candidate == pointer || strings.HasPrefix(candidate, pointer+"/") {
+			target[candidate] = description
+		}
+	}
 }
 
 func cloneConfigValue(value any) any {

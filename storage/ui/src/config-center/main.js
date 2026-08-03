@@ -1,27 +1,56 @@
 import Alpine from "alpinejs";
 import {
+  buildComparisonSourceRows,
   buildEnvironmentDisplayTree,
-  buildEnvironmentTree,
+  buildParentEnvironmentTree,
   cloneConfigValue,
   ConfigTypeMemory,
-  deepMerge,
-  formatEnvironmentTreeLabel,
+  defaultComparisonSources,
 } from "./config-value.js";
+import {
+  CONFIG_FORMATS,
+  formatConfig,
+  mergeConfigState,
+  moveArrayDescriptionItem,
+  pathToPointer,
+  removeArrayDescriptionItem,
+  removeDescriptionSubtree,
+  remapDescriptionPrefix,
+} from "./config-format.js";
 import "./main.css";
 
 const API_ROOT = "/config-center/api";
+const DISPLAY_FORMAT_STORAGE_KEY = "config-center.display-format";
+let diffsModulePromise;
 
 class ConfigTreeEditor {
-  constructor(root, value, onChange, onError, typeMemory) {
+  constructor(root, value, descriptions, onChange, onError, typeMemory) {
     this.root = root;
     this.value = value;
+    this.descriptions = descriptions;
     this.onChange = onChange;
     this.onError = onError;
     this.typeMemory = typeMemory;
+    this.descriptionMemory = new Map();
+    this.activeDescriptionControl = null;
+    this.descriptionSequence = 0;
+    this.handleDescriptionPointerDown = (event) => {
+      if (this.activeDescriptionControl?.wrapper.contains(event.target)) return;
+      this.closeDescriptionPopover();
+    };
+    this.handleDescriptionKeyDown = (event) => {
+      if (event.key !== "Escape" || !this.activeDescriptionControl) return;
+      event.preventDefault();
+      this.closeDescriptionPopover(true);
+    };
+    document.addEventListener("pointerdown", this.handleDescriptionPointerDown);
+    document.addEventListener("keydown", this.handleDescriptionKeyDown);
   }
 
-  render(value) {
+  render(value, descriptions = this.descriptions) {
+    this.closeDescriptionPopover();
     this.value = value;
+    this.descriptions = descriptions;
     this.root.replaceChildren();
     const rootNode = document.createElement("div");
     rootNode.className = "config-root";
@@ -96,7 +125,10 @@ class ConfigTreeEditor {
         const previousType = valueType(this.at(path));
         if (previousType === nextType) return;
         this.typeMemory.remember(path, previousType, this.at(path));
+        this.rememberDescriptionSubtree(path, previousType);
         this.replace(path, this.typeMemory.restore(path, nextType, defaultValue(nextType)));
+        this.descriptions = removeDescriptionSubtree(this.descriptions, path, true);
+        this.restoreDescriptionSubtree(path, nextType);
         this.commit();
       },
     });
@@ -106,6 +138,7 @@ class ConfigTreeEditor {
 
     const actions = document.createElement("div");
     actions.className = "config-actions";
+    actions.append(this.renderDescriptionControl(path, key));
     if (parentIsArray) {
       const up = this.button("↑", "config-action", "上移");
       up.disabled = index === 0;
@@ -118,8 +151,18 @@ class ConfigTreeEditor {
     const remove = this.button("×", "config-action config-remove", "删除");
     remove.addEventListener("click", () => {
       const parent = this.at(parentPath);
-      if (Array.isArray(parent)) parent.splice(Number(key), 1);
-      else delete parent[key];
+      if (Array.isArray(parent)) {
+        this.descriptions = removeArrayDescriptionItem(
+          this.descriptions,
+          parentPath,
+          Number(key),
+          parent.length,
+        );
+        parent.splice(Number(key), 1);
+      } else {
+        this.descriptions = removeDescriptionSubtree(this.descriptions, path);
+        delete parent[key];
+      }
       this.commit();
     });
     actions.append(remove);
@@ -134,6 +177,113 @@ class ConfigTreeEditor {
       wrapper.append(nested);
     }
     return wrapper;
+  }
+
+  renderDescriptionControl(path, key) {
+    const pointer = pathToPointer(path);
+    const currentDescription = this.descriptions[pointer] ?? "";
+    const wrapper = document.createElement("div");
+    wrapper.className = "config-description-control";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "config-action config-description-trigger";
+    trigger.classList.toggle("config-description-trigger-has-value", Boolean(currentDescription.trim()));
+    trigger.title = currentDescription.trim() || "添加配置说明";
+    trigger.setAttribute("aria-label", `${currentDescription.trim() ? "编辑" : "添加"}配置项 ${String(key)} 的说明`);
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.append(this.descriptionIcon());
+
+    const popover = document.createElement("div");
+    const popoverID = `config-description-popover-${++this.descriptionSequence}`;
+    popover.id = popoverID;
+    popover.className = "config-description-popover";
+    popover.hidden = true;
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", `配置项 ${String(key)} 的说明`);
+    trigger.setAttribute("aria-controls", popoverID);
+
+    const header = document.createElement("div");
+    header.className = "config-description-popover-header";
+    const title = document.createElement("strong");
+    title.textContent = "配置说明";
+    const close = this.button("×", "config-description-close", "关闭说明编辑框");
+    header.append(title, close);
+
+    const description = document.createElement("textarea");
+    description.className = "config-description-input";
+    description.rows = 4;
+    description.maxLength = 2000;
+    description.placeholder = "说明这个配置项的用途、取值约束或注意事项（可选）";
+    description.setAttribute("aria-label", `配置项 ${String(key)} 的说明内容`);
+    description.value = currentDescription;
+
+    const count = document.createElement("span");
+    count.className = "config-description-count";
+    count.textContent = `${description.value.length}/2000`;
+
+    const control = { wrapper, trigger, popover, description };
+    trigger.addEventListener("click", () => {
+      if (this.activeDescriptionControl === control) {
+        this.closeDescriptionPopover(true);
+        return;
+      }
+      this.openDescriptionPopover(control);
+    });
+    close.addEventListener("click", () => this.closeDescriptionPopover(true));
+    description.addEventListener("input", () => {
+      const nextDescription = description.value;
+      if (nextDescription.trim()) this.descriptions[pointer] = nextDescription;
+      else delete this.descriptions[pointer];
+      const hasDescription = Boolean(nextDescription.trim());
+      trigger.classList.toggle("config-description-trigger-has-value", hasDescription);
+      trigger.title = hasDescription ? nextDescription.trim() : "添加配置说明";
+      trigger.setAttribute("aria-label", `${hasDescription ? "编辑" : "添加"}配置项 ${String(key)} 的说明`);
+      count.textContent = `${nextDescription.length}/2000`;
+      this.commit(false);
+    });
+
+    popover.append(header, description, count);
+    wrapper.append(trigger, popover);
+    return wrapper;
+  }
+
+  descriptionIcon() {
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("config-description-icon");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M6.75 4.75h10.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3v-3.1a2 2 0 0 1-1.75-1.98V6.75a2 2 0 0 1 2-2Z");
+    icon.append(path);
+    return icon;
+  }
+
+  openDescriptionPopover(control) {
+    this.closeDescriptionPopover();
+    this.activeDescriptionControl = control;
+    control.popover.hidden = false;
+    control.trigger.setAttribute("aria-expanded", "true");
+    control.wrapper.classList.add("config-description-control-open");
+    control.description.focus({ preventScroll: true });
+    control.description.setSelectionRange(control.description.value.length, control.description.value.length);
+  }
+
+  closeDescriptionPopover(restoreFocus = false) {
+    const control = this.activeDescriptionControl;
+    if (!control) return;
+    control.popover.hidden = true;
+    control.trigger.setAttribute("aria-expanded", "false");
+    control.wrapper.classList.remove("config-description-control-open");
+    this.activeDescriptionControl = null;
+    if (restoreFocus && control.trigger.isConnected) control.trigger.focus({ preventScroll: true });
+  }
+
+  destroy() {
+    this.closeDescriptionPopover();
+    document.removeEventListener("pointerdown", this.handleDescriptionPointerDown);
+    document.removeEventListener("keydown", this.handleDescriptionKeyDown);
   }
 
   renderValueInput(path, value) {
@@ -173,7 +323,7 @@ class ConfigTreeEditor {
     input.addEventListener("input", () => {
       if (type === "string") {
         this.replace(path, input.value);
-        this.onChange(cloneConfigValue(this.value), false);
+        this.onChange(cloneConfigValue(this.value), { ...this.descriptions }, false);
       }
     });
     input.addEventListener("change", () => {
@@ -215,12 +365,18 @@ class ConfigTreeEditor {
     const entries = Object.entries(parent).map(([entryKey, entryValue]) => entryKey === oldKey ? [key, entryValue] : [entryKey, entryValue]);
     Object.keys(parent).forEach((entryKey) => delete parent[entryKey]);
     entries.forEach(([entryKey, entryValue]) => { parent[entryKey] = entryValue; });
+    this.descriptions = remapDescriptionPrefix(
+      this.descriptions,
+      [...parentPath, oldKey],
+      [...parentPath, key],
+    );
     this.commit();
   }
 
   moveArrayItem(parentPath, from, to) {
     const parent = this.at(parentPath);
     if (to < 0 || to >= parent.length) return;
+    this.descriptions = moveArrayDescriptionItem(this.descriptions, parentPath, from, to);
     const [item] = parent.splice(from, 1);
     parent.splice(to, 0, item);
     this.commit();
@@ -237,9 +393,24 @@ class ConfigTreeEditor {
 
   commit(render = true) {
     const snapshot = cloneConfigValue(this.value);
+    const descriptionSnapshot = { ...this.descriptions };
     this.value = snapshot;
-    this.onChange(snapshot, render);
-    if (render) this.render(snapshot);
+    this.descriptions = descriptionSnapshot;
+    this.onChange(snapshot, descriptionSnapshot, render);
+    if (render) this.render(snapshot, descriptionSnapshot);
+  }
+
+  rememberDescriptionSubtree(path, type) {
+    const pointer = pathToPointer(path);
+    const subtree = Object.fromEntries(Object.entries(this.descriptions).filter(([candidate]) => (
+      candidate.startsWith(`${pointer}/`)
+    )));
+    this.descriptionMemory.set(`${JSON.stringify(path)}:${type}`, subtree);
+  }
+
+  restoreDescriptionSubtree(path, type) {
+    const subtree = this.descriptionMemory.get(`${JSON.stringify(path)}:${type}`);
+    if (subtree) Object.assign(this.descriptions, subtree);
   }
 
   nextKey(object) {
@@ -277,6 +448,9 @@ class ConfigTreeEditor {
     menu.className = "config-dropdown-menu";
     menu.setAttribute("role", "listbox");
     menu.hidden = true;
+    const menuScroll = document.createElement("div");
+    menuScroll.className = "select-menu-scroll";
+    menu.append(menuScroll);
 
     const close = () => {
       menu.hidden = true;
@@ -298,7 +472,7 @@ class ConfigTreeEditor {
         close();
         if (option.value !== value) onChange(option.value);
       });
-      menu.append(item);
+      menuScroll.append(item);
     });
 
     trigger.addEventListener("click", () => menu.hidden ? open() : close());
@@ -317,14 +491,21 @@ class ConfigTreeEditor {
 
 function configCenterApp() {
   let treeEditor = null;
+  let diffViewer = null;
   const typeMemory = new ConfigTypeMemory();
   const toastTimers = new Set();
 
   return {
     environments: [], selectedID: 0, publishIDs: [], inheritanceChain: [],
-    draft: {}, inherited: {}, finalConfig: {}, publishedRelease: null,
+    draft: {}, draftDescriptions: {}, inherited: {}, inheritedDescriptions: {},
+    finalConfig: {}, finalDescriptions: {}, publishedRelease: null,
     loadingEnvironments: true, loadingConfig: false, saving: false, publishing: false,
     publishedLoading: false, dirty: false, tab: "draft",
+    publishedVersions: [], publishedVersion: 0, publishedVersionMenu: false,
+    displayFormat: "json", formatMenu: "",
+    configFormats: CONFIG_FORMATS,
+    releases: [], comparisonLoading: false, comparisonError: "", comparisonMenu: "",
+    comparisonLeft: "", comparisonRight: "", comparisonLeftData: null, comparisonRightData: null,
     environmentModal: false, environmentSaving: false, parentSelectorOpen: false,
     sidebarHidden: false, confirming: false,
     toasts: [], toastSequence: 0,
@@ -336,11 +517,16 @@ function configCenterApp() {
     async init() {
       try {
         this.sidebarHidden = window.localStorage.getItem("config-center.sidebar-hidden") === "true";
+        const savedFormat = window.localStorage.getItem(DISPLAY_FORMAT_STORAGE_KEY);
+        if (CONFIG_FORMATS.some((format) => format.value === savedFormat)) {
+          this.displayFormat = savedFormat;
+        }
       } catch {
         this.sidebarHidden = false;
       }
       this.$watch("tab", (tab) => {
         if (tab === "draft") this.$nextTick(() => this.renderEditor());
+        if (tab === "compare") this.$nextTick(() => this.renderComparisonDiff());
       });
       await this.loadEnvironments();
       if (this.environments.length > 0) {
@@ -354,7 +540,10 @@ function configCenterApp() {
     destroy() {
       toastTimers.forEach((timer) => window.clearTimeout(timer));
       toastTimers.clear();
+      treeEditor?.destroy();
       treeEditor = null;
+      diffViewer?.cleanUp();
+      diffViewer = null;
       typeMemory.clear();
     },
     handleBeforeUnload(event) {
@@ -382,15 +571,37 @@ function configCenterApp() {
 
     get selectedEnvironment() { return this.environments.find((item) => item.id === this.selectedID) ?? null; },
     get availableParents() { return this.environments.filter((item) => item.id !== this.environmentForm.id && !this.isDescendant(item.id, this.environmentForm.id)); },
-    get availableParentRows() { return buildEnvironmentTree(this.availableParents); },
+    get availableParentRows() { return buildParentEnvironmentTree(this.availableParents); },
     get selectedParentLabel() {
       if (!this.environmentForm.parent_id) return "无（创建为根环境）";
       const environment = this.environments.find((item) => item.id === this.environmentForm.parent_id);
       return environment ? `${environment.name}（${environment.slug}）` : "请选择父环境";
     },
     get publishSelectionLabel() { return this.publishIDs.length ? `已选择 ${this.publishIDs.length} 个环境` : "选择环境后可批量发布"; },
-    get formattedFinal() { return JSON.stringify(deepMerge(this.inherited, this.draft), null, 2); },
-    get formattedPublished() { return this.publishedRelease ? JSON.stringify(this.publishedRelease.config, null, 2) : ""; },
+    get mergedDraftState() {
+      return mergeConfigState(this.inherited, this.inheritedDescriptions, this.draft, this.draftDescriptions);
+    },
+    get formattedFinal() {
+      const merged = this.mergedDraftState;
+      return formatConfig(merged.config, merged.descriptions, this.displayFormat);
+    },
+    get formattedPublished() {
+      return this.publishedRelease
+        ? formatConfig(this.publishedRelease.config, this.publishedRelease.descriptions, this.displayFormat)
+        : "";
+    },
+    get finalConfigEmpty() { return configIsEmpty(this.mergedDraftState.config); },
+    get publishedConfigEmpty() { return this.publishedRelease ? configIsEmpty(this.publishedRelease.config) : false; },
+    get comparisonConfigsEmpty() {
+      return Boolean(
+        this.comparisonLeftData
+        && this.comparisonRightData
+        && configIsEmpty(this.comparisonLeftData.config)
+        && configIsEmpty(this.comparisonRightData.config),
+      );
+    },
+    get comparisonSourceRows() { return buildComparisonSourceRows(this.environments, this.releases); },
+    get comparisonSourceOptions() { return this.comparisonSourceRows.flatMap((row) => row.sources); },
     get environmentTreeRows() { return buildEnvironmentDisplayTree(this.environments); },
 
     async loadEnvironments() {
@@ -423,6 +634,14 @@ function configCenterApp() {
       this.selectedID = id;
       this.tab = "draft";
       this.publishedRelease = null;
+      this.publishedVersions = [];
+      this.publishedVersion = 0;
+      this.comparisonLeft = "";
+      this.comparisonRight = "";
+      this.comparisonLeftData = null;
+      this.comparisonRightData = null;
+      this.comparisonError = "";
+      this.comparisonMenu = "";
       const loaded = await this.loadDraft();
       if (loaded && urlMode !== "none") this.syncEnvironmentURL(id, urlMode);
     },
@@ -434,8 +653,11 @@ function configCenterApp() {
       try {
         const data = await api(`/environments/${this.selectedID}/config`);
         this.draft = cloneConfigValue(data.draft);
+        this.draftDescriptions = { ...(data.draft_descriptions ?? {}) };
         this.inherited = cloneConfigValue(data.inherited);
+        this.inheritedDescriptions = { ...(data.inherited_descriptions ?? {}) };
         this.finalConfig = cloneConfigValue(data.final);
+        this.finalDescriptions = { ...(data.final_descriptions ?? {}) };
         this.inheritanceChain = data.inheritance_chain;
         this.dirty = false;
         loaded = true;
@@ -454,26 +676,38 @@ function configCenterApp() {
     renderEditor() {
       if (!this.$refs.treeEditor || this.tab !== "draft") return;
       if (!treeEditor || treeEditor.root !== this.$refs.treeEditor) {
+        treeEditor?.destroy();
         treeEditor = new ConfigTreeEditor(
           this.$refs.treeEditor,
           this.draft,
-          (value) => { this.draft = value; this.dirty = true; },
+          this.draftDescriptions,
+          (value, descriptions) => {
+            this.draft = value;
+            this.draftDescriptions = descriptions;
+            this.dirty = true;
+          },
           (message) => this.notify(message, "error"),
           typeMemory,
         );
       }
-      treeEditor.render(cloneConfigValue(this.draft));
+      treeEditor.render(cloneConfigValue(this.draft), { ...this.draftDescriptions });
     },
 
     async saveDraft() {
       if (!this.dirty || this.saving) return;
       this.saving = true;
       try {
-        const data = await api(`/environments/${this.selectedID}/config`, { method: "PUT", body: { config: this.draft } });
+        const data = await api(`/environments/${this.selectedID}/config`, {
+          method: "PUT",
+          body: { config: this.draft, descriptions: this.draftDescriptions },
+        });
         this.inherited = cloneConfigValue(data.inherited);
+        this.inheritedDescriptions = { ...(data.inherited_descriptions ?? {}) };
         this.finalConfig = cloneConfigValue(data.final);
+        this.finalDescriptions = { ...(data.final_descriptions ?? {}) };
         this.inheritanceChain = data.inheritance_chain;
         this.dirty = false;
+        await this.loadEnvironments();
         this.notify("草稿已保存");
       } catch (error) {
         this.notify(error.message, "error");
@@ -566,8 +800,9 @@ function configCenterApp() {
       this.publishing = true;
       try {
         const data = await api("/publish", { method: "POST", body: { environment_ids: this.publishIDs } });
+        this.releases = [];
         await this.loadEnvironments();
-        if (this.tab === "published") await this.loadPublished();
+        if (this.tab === "published") await this.loadPublishedVersions();
         this.notify(`发布成功，批次 ${data.publication.batch_id}`);
       } catch (error) {
         this.notify(error.message, "error");
@@ -615,12 +850,18 @@ function configCenterApp() {
       }
     },
 
-    async openPublishedTab() { this.tab = "published"; await this.loadPublished(); },
-    async loadPublished() {
+    async openPublishedTab() { this.tab = "published"; await this.loadPublishedVersions(); },
+    async loadPublishedVersions() {
       this.publishedLoading = true;
       try {
-        const data = await api(`/environments/${this.selectedID}/published`);
-        this.publishedRelease = data.release;
+        const data = await api(`/environments/${this.selectedID}/releases`);
+        this.publishedVersions = data.releases;
+        this.publishedVersion = this.publishedVersions[0]?.version ?? 0;
+        if (!this.publishedVersion) {
+          this.publishedRelease = null;
+          return;
+        }
+        await this.loadPublished(this.publishedVersion, false);
       } catch (error) {
         if (error.status === 404) this.publishedRelease = null;
         else this.notify(error.message, "error");
@@ -628,9 +869,140 @@ function configCenterApp() {
         this.publishedLoading = false;
       }
     },
+    async loadPublished(version, manageLoading = true) {
+      if (!version) return;
+      if (manageLoading) this.publishedLoading = true;
+      this.publishedVersionMenu = false;
+      try {
+        const data = await api(`/environments/${this.selectedID}/releases/${version}`);
+        this.publishedVersion = Number(version);
+        this.publishedRelease = data.release;
+      } catch (error) {
+        this.notify(error.message, "error");
+      } finally {
+        if (manageLoading) this.publishedLoading = false;
+      }
+    },
+
+    selectFormat(format) {
+      if (!CONFIG_FORMATS.some((item) => item.value === format)) return;
+      this.displayFormat = format;
+      this.formatMenu = "";
+      try {
+        window.localStorage.setItem(DISPLAY_FORMAT_STORAGE_KEY, format);
+      } catch {
+        // Format selection remains active when browser storage is unavailable.
+      }
+      if (this.tab === "compare") this.$nextTick(() => this.renderComparisonDiff());
+    },
+    formatLabel(format) {
+      return CONFIG_FORMATS.find((item) => item.value === format)?.label ?? "JSON";
+    },
+    async openCompareTab() {
+      this.tab = "compare";
+      if (!this.releases.length) {
+        try {
+          const data = await api("/releases");
+          this.releases = data.releases;
+        } catch (error) {
+          this.notify(error.message, "error");
+        }
+      }
+      if (!this.comparisonLeft || !this.comparisonRight) {
+        const defaults = defaultComparisonSources(this.environments, this.selectedID, this.releases);
+        this.comparisonLeft = defaults.left;
+        this.comparisonRight = defaults.right;
+      }
+      await this.loadComparison();
+    },
+    selectComparisonSource(side, value) {
+      if (side === "left") this.comparisonLeft = value;
+      else this.comparisonRight = value;
+      this.comparisonMenu = "";
+      this.loadComparison();
+    },
+    comparisonSourceLabel(value) {
+      return this.comparisonSourceOptions.find((option) => option.value === value)?.fullLabel ?? "选择对比来源";
+    },
+    comparisonRowSelected(row, side) {
+      const selected = side === "left" ? this.comparisonLeft : this.comparisonRight;
+      return row.sources.some((source) => source.value === selected);
+    },
+    async loadComparison() {
+      if (!this.comparisonLeft || !this.comparisonRight) return;
+      this.comparisonLoading = true;
+      this.comparisonError = "";
+      try {
+        const [left, right] = await Promise.all([
+          this.loadComparisonSource(this.comparisonLeft),
+          this.loadComparisonSource(this.comparisonRight),
+        ]);
+        this.comparisonLeftData = left;
+        this.comparisonRightData = right;
+        await this.$nextTick();
+        this.renderComparisonDiff();
+      } catch (error) {
+        this.comparisonError = error.message;
+        this.notify(error.message, "error");
+      } finally {
+        this.comparisonLoading = false;
+      }
+    },
+    async loadComparisonSource(source) {
+      const [kind, environmentID, version] = source.split(":");
+      if (kind === "draft") {
+        const data = await api(`/environments/${environmentID}/final`);
+        return { config: data.config, descriptions: data.descriptions ?? {} };
+      }
+      const data = await api(`/environments/${environmentID}/releases/${version}`);
+      return { config: data.release.config, descriptions: data.release.descriptions ?? {} };
+    },
+    async renderComparisonDiff() {
+      if (!this.$refs.diffViewer || this.tab !== "compare" || !this.comparisonLeftData || !this.comparisonRightData) return;
+      if (this.comparisonConfigsEmpty) {
+        diffViewer?.cleanUp();
+        diffViewer = null;
+        this.$refs.diffViewer.replaceChildren();
+        return;
+      }
+      diffsModulePromise ??= import("@pierre/diffs");
+      const { FileDiff } = await diffsModulePromise;
+      const root = this.$refs.diffViewer;
+      if (!root || this.tab !== "compare") return;
+      diffViewer?.cleanUp();
+      diffViewer = null;
+      root.replaceChildren();
+      const extension = CONFIG_FORMATS.find((format) => format.value === this.displayFormat)?.extension ?? "json";
+      const fileName = `config.${extension}`;
+      const oldFile = {
+        name: fileName,
+        contents: formatConfig(
+          this.comparisonLeftData.config,
+          this.comparisonLeftData.descriptions,
+          this.displayFormat,
+        ),
+      };
+      const newFile = {
+        name: fileName,
+        contents: formatConfig(
+          this.comparisonRightData.config,
+          this.comparisonRightData.descriptions,
+          this.displayFormat,
+        ),
+      };
+      diffViewer = new FileDiff({
+        diffStyle: "split",
+        diffIndicators: "bars",
+        expandUnchanged: true,
+        hunkSeparators: "line-info-basic",
+        overflow: "wrap",
+        theme: "pierre-light",
+        themeType: "light",
+      });
+      diffViewer.render({ oldFile, newFile, containerWrapper: root });
+    },
 
     environmentName(id) { return this.environments.find((item) => item.id === id)?.name ?? "未知环境"; },
-    environmentTreeLabel(row) { return formatEnvironmentTreeLabel(row); },
     environmentIDFromURL() {
       const value = new URL(window.location.href).searchParams.get("environment");
       const id = Number(value);
@@ -695,6 +1067,10 @@ function valueType(value) {
   if (typeof value === "boolean") return "bool";
   if (typeof value === "number") return "number";
   return "string";
+}
+
+function configIsEmpty(config) {
+  return !config || Object.keys(config).length === 0;
 }
 function defaultValue(type) {
   return { object: {}, array: [], string: "", bool: false, number: 0 }[type];

@@ -9,10 +9,14 @@ import (
 )
 
 const (
-	testBase    = "base"
-	testFlags   = "flags"
-	testPort    = "port"
-	testService = "service"
+	testBase               = "base"
+	testFlags              = "flags"
+	testHost               = "host"
+	testPort               = "port"
+	testProd               = "prod"
+	testRegions            = "regions"
+	testService            = "service"
+	testServiceHostPointer = "/service/host"
 )
 
 func TestDecodeConfigPreservesSupportedTypes(t *testing.T) {
@@ -71,7 +75,7 @@ func TestMergeConfigRecursivelyMergesObjectsAndReplacesArrays(t *testing.T) {
 	t.Parallel()
 
 	base := map[string]any{
-		testService: map[string]any{"host": testBase, testPort: json.Number("80")},
+		testService: map[string]any{testHost: testBase, testPort: json.Number("80")},
 		testFlags:   []any{testBase},
 		"keep":      true,
 	}
@@ -80,7 +84,7 @@ func TestMergeConfigRecursivelyMergesObjectsAndReplacesArrays(t *testing.T) {
 		testFlags:   []any{"child", "replacement"},
 	}
 	want := map[string]any{
-		testService: map[string]any{"host": testBase, testPort: json.Number("443")},
+		testService: map[string]any{testHost: testBase, testPort: json.Number("443")},
 		testFlags:   []any{"child", "replacement"},
 		"keep":      true,
 	}
@@ -90,17 +94,93 @@ func TestMergeConfigRecursivelyMergesObjectsAndReplacesArrays(t *testing.T) {
 	if gotErr != nil || wantErr != nil || string(gotJSON) != string(wantJSON) {
 		t.Fatalf("mergeConfig() = %#v, want %#v", got, want)
 	}
-	got.(map[string]any)["service"].(map[string]any)["host"] = "changed"
-	if base["service"].(map[string]any)["host"] != testBase {
+	got.(map[string]any)[testService].(map[string]any)[testHost] = "changed"
+	if base[testService].(map[string]any)[testHost] != testBase {
 		t.Fatal("mergeConfig() mutated the base configuration")
 	}
+}
+
+func TestDecodeConfigDescriptionsValidatesJSONPointers(t *testing.T) {
+	t.Parallel()
+
+	config, err := DecodeConfig([]byte(`{"service/api":{"host":"localhost"},"regions":["cn"]}`))
+	if err != nil {
+		t.Fatalf("DecodeConfig() error = %v", err)
+	}
+	descriptions, err := DecodeConfigDescriptions(
+		[]byte(`{"/service~1api":" service settings ","/service~1api/host":"host","/regions/0":"China"}`),
+		config,
+	)
+	if err != nil {
+		t.Fatalf("DecodeConfigDescriptions() error = %v", err)
+	}
+	if descriptions["/service~1api"] != "service settings" {
+		t.Fatalf("description = %q, want normalized value", descriptions["/service~1api"])
+	}
+
+	_, err = DecodeConfigDescriptions([]byte(`{"/regions/1":"missing"}`), config)
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("DecodeConfigDescriptions() error = %v, want ErrConfigInvalid", err)
+	}
+}
+
+func TestMergeConfigWithDescriptionsReplacesDescriptionSubtrees(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		testService: map[string]any{testHost: testBase, testPort: json.Number("80")},
+		testRegions: []any{"cn", "us"},
+	}
+	override := map[string]any{
+		testService: map[string]any{testHost: testProd},
+		testRegions: []any{"cn"},
+	}
+	merged, descriptions := mergeConfigWithDescriptions(
+		base,
+		ConfigDescriptions{
+			"/service":             "service",
+			testServiceHostPointer: "base host",
+			"/regions/1":           "US",
+		},
+		override,
+		ConfigDescriptions{
+			testServiceHostPointer: "production host",
+			"/regions":             testRegions,
+			"/regions/0":           "China",
+		},
+		"",
+	)
+	want := ConfigDescriptions{
+		"/service":             "service",
+		testServiceHostPointer: "production host",
+		"/regions":             testRegions,
+		"/regions/0":           "China",
+	}
+	if !equalDescriptions(descriptions, want) {
+		t.Fatalf("descriptions = %#v, want %#v", descriptions, want)
+	}
+	if merged.(map[string]any)[testService].(map[string]any)[testPort] != json.Number("80") {
+		t.Fatal("mergeConfigWithDescriptions() did not preserve inherited object fields")
+	}
+}
+
+func equalDescriptions(left, right ConfigDescriptions) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for pointer, description := range left {
+		if right[pointer] != description {
+			return false
+		}
+	}
+	return true
 }
 
 func TestResolveConfigFromEnvironmentsBuildsRootToLeafChain(t *testing.T) {
 	t.Parallel()
 
 	environments := []ConfigEnvironment{
-		{ID: 3, ParentID: 2, Name: "prod", DraftConfig: `{"service":{"host":"prod"}}`},
+		{ID: 3, ParentID: 2, Name: testProd, DraftConfig: `{"service":{"host":"prod"}}`},
 		{ID: 1, Name: testBase, DraftConfig: `{"service":{"host":"base","port":80},"enabled":true}`},
 		{ID: 2, ParentID: 1, Name: "region", DraftConfig: `{"service":{"port":8080}}`},
 	}
@@ -112,8 +192,45 @@ func TestResolveConfigFromEnvironmentsBuildsRootToLeafChain(t *testing.T) {
 		t.Fatalf("chain IDs = %v, want [1 2 3]", got)
 	}
 	service := resolved.Config[testService].(map[string]any)
-	if service["host"] != "prod" || service[testPort] != json.Number("8080") {
+	if service[testHost] != testProd || service[testPort] != json.Number("8080") {
 		t.Fatalf("resolved service = %#v", service)
+	}
+}
+
+func TestApplyConfigEnvironmentReleaseStateDetectsDraftChanges(t *testing.T) {
+	t.Parallel()
+
+	environments := []ConfigEnvironment{
+		{ID: 1, DraftConfig: `{"service":{"host":"base"}}`, DraftDescriptions: `{}`},
+		{ID: 2, ParentID: 1, DraftConfig: `{"service":{"port":8080}}`, DraftDescriptions: `{}`},
+		{ID: 3, DraftConfig: `{}`, DraftDescriptions: `{}`},
+	}
+	releases := []ConfigRelease{
+		{
+			EnvironmentID: 1,
+			Version:       2,
+			Config:        `{"service":{"host":"base"}}`,
+			Descriptions:  `{}`,
+		},
+		{
+			EnvironmentID: 2,
+			Version:       4,
+			Config:        `{"service":{"host":"old","port":8080}}`,
+			Descriptions:  `{}`,
+		},
+	}
+
+	if err := applyConfigEnvironmentReleaseState(environments, releases); err != nil {
+		t.Fatalf("applyConfigEnvironmentReleaseState() error = %v", err)
+	}
+	if environments[0].HasDraft || environments[0].Version != 2 {
+		t.Fatalf("base state = hasDraft %t, version %d; want false, 2", environments[0].HasDraft, environments[0].Version)
+	}
+	if !environments[1].HasDraft || environments[1].Version != 4 {
+		t.Fatalf("child state = hasDraft %t, version %d; want true, 4", environments[1].HasDraft, environments[1].Version)
+	}
+	if !environments[2].HasDraft || environments[2].Version != 0 {
+		t.Fatalf("unpublished state = hasDraft %t, version %d; want true, 0", environments[2].HasDraft, environments[2].Version)
 	}
 }
 

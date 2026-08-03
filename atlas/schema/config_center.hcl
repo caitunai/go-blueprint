@@ -1,5 +1,7 @@
 table "gb_config_environments" {
   schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
   column "id" {
     null           = false
     type           = bigint
@@ -27,6 +29,10 @@ table "gb_config_environments" {
     null = false
     type = mediumtext
   }
+  column "draft_descriptions" {
+    null = false
+    type = mediumtext
+  }
   column "created_at" {
     null    = false
     type    = timestamp
@@ -51,6 +57,8 @@ table "gb_config_environments" {
 
 table "gb_config_releases" {
   schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
   column "id" {
     null           = false
     type           = bigint
@@ -69,6 +77,10 @@ table "gb_config_releases" {
     type = bigint
   }
   column "config" {
+    null = false
+    type = mediumtext
+  }
+  column "descriptions" {
     null = false
     type = mediumtext
   }

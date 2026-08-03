@@ -31,7 +31,8 @@ type configEnvironmentForm struct {
 }
 
 type configDraftForm struct {
-	Config json.RawMessage `json:"config" binding:"required"`
+	Config       json.RawMessage `json:"config" binding:"required"`
+	Descriptions json.RawMessage `json:"descriptions"`
 }
 
 type configPublishForm struct {
@@ -63,6 +64,9 @@ func ConfigCenterControl(r *base.Router) {
 	r.PUT("/environments/:id/config", saveConfigDraft)
 	r.GET("/environments/:id/final", getFinalConfig)
 	r.GET("/environments/:id/published", getPublishedConfig)
+	r.GET("/environments/:id/releases", listConfigReleases)
+	r.GET("/environments/:id/releases/:version", getConfigRelease)
+	r.GET("/releases", listAllConfigReleases)
 	r.POST("/publish", publishConfigs)
 }
 
@@ -127,22 +131,25 @@ func getConfigDraft(c *base.Context) {
 	if !ok {
 		return
 	}
-	resolved, draft, err := db.GetConfigDraft(c.Request.Context(), id)
+	resolved, draft, descriptions, err := db.GetConfigDraft(c.Request.Context(), id)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
-	inherited, err := inheritedConfig(c, resolved.Environment.ParentID)
+	inherited, inheritedDescriptions, err := inheritedConfig(c, resolved.Environment.ParentID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
 	c.Success(gin.H{
-		keyConfigEnvironment: resolved.Environment,
-		keyInheritanceChain:  resolved.Chain,
-		"draft":              draft,
-		"inherited":          inherited,
-		"final":              resolved.Config,
+		keyConfigEnvironment:     resolved.Environment,
+		keyInheritanceChain:      resolved.Chain,
+		"draft":                  draft,
+		"draft_descriptions":     descriptions,
+		"inherited":              inherited,
+		"inherited_descriptions": inheritedDescriptions,
+		"final":                  resolved.Config,
+		"final_descriptions":     resolved.Descriptions,
 	})
 }
 
@@ -151,28 +158,38 @@ func saveConfigDraft(c *base.Context) {
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, db.MaxConfigBytes+1024)
+	c.Request.Body = http.MaxBytesReader(
+		c.Writer,
+		c.Request.Body,
+		int64(db.MaxConfigBytes+db.MaxConfigDescriptionBytes+2048),
+	)
 	form := &configDraftForm{}
 	if err := c.ShouldBindJSON(form); err != nil {
 		c.ErrorForm("配置内容格式不正确", gin.H{KeyError: err.Error()})
 		return
 	}
-	resolved, err := db.SaveConfigDraft(c.Request.Context(), id, form.Config)
+	descriptions := form.Descriptions
+	if len(descriptions) == 0 {
+		descriptions = json.RawMessage("{}")
+	}
+	resolved, err := db.SaveConfigDraft(c.Request.Context(), id, form.Config, descriptions)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
 	log.Ctx(c.Request.Context()).Info().Uint("environment_id", id).Msg("config draft saved")
-	inherited, err := inheritedConfig(c, resolved.Environment.ParentID)
+	inherited, inheritedDescriptions, err := inheritedConfig(c, resolved.Environment.ParentID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
 	c.Success(gin.H{
-		keyConfigEnvironment: resolved.Environment,
-		keyInheritanceChain:  resolved.Chain,
-		"inherited":          inherited,
-		"final":              resolved.Config,
+		keyConfigEnvironment:     resolved.Environment,
+		keyInheritanceChain:      resolved.Chain,
+		"inherited":              inherited,
+		"inherited_descriptions": inheritedDescriptions,
+		"final":                  resolved.Config,
+		"final_descriptions":     resolved.Descriptions,
 	})
 }
 
@@ -190,6 +207,7 @@ func getFinalConfig(c *base.Context) {
 		keyConfigEnvironment: resolved.Environment,
 		keyInheritanceChain:  resolved.Chain,
 		"config":             resolved.Config,
+		"descriptions":       resolved.Descriptions,
 	})
 }
 
@@ -199,6 +217,46 @@ func getPublishedConfig(c *base.Context) {
 		return
 	}
 	published, err := db.LatestPublishedConfig(c.Request.Context(), id)
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	c.Success(gin.H{"release": published})
+}
+
+func listConfigReleases(c *base.Context) {
+	id, ok := configEnvironmentID(c)
+	if !ok {
+		return
+	}
+	releases, err := db.ListConfigReleases(c.Request.Context(), id)
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	c.Success(gin.H{"releases": releases})
+}
+
+func listAllConfigReleases(c *base.Context) {
+	releases, err := db.ListAllConfigReleases(c.Request.Context())
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	c.Success(gin.H{"releases": releases})
+}
+
+func getConfigRelease(c *base.Context) {
+	id, ok := configEnvironmentID(c)
+	if !ok {
+		return
+	}
+	version, err := strconv.ParseUint(c.Param("version"), 10, 64)
+	if err != nil || version == 0 {
+		c.ErrorForm("发布版本不正确", gin.H{})
+		return
+	}
+	published, err := db.PublishedConfigVersion(c.Request.Context(), id, version)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -242,15 +300,15 @@ func configEnvironmentInput(form *configEnvironmentForm) db.ConfigEnvironmentInp
 	}
 }
 
-func inheritedConfig(c *base.Context, parentID uint) (map[string]any, error) {
+func inheritedConfig(c *base.Context, parentID uint) (map[string]any, db.ConfigDescriptions, error) {
 	if parentID == 0 {
-		return make(map[string]any), nil
+		return make(map[string]any), make(db.ConfigDescriptions), nil
 	}
 	resolved, err := db.ResolveConfigDraft(c.Request.Context(), parentID)
 	if err != nil {
-		return nil, errors.Join(errConfigInheritance, err)
+		return nil, nil, errors.Join(errConfigInheritance, err)
 	}
-	return resolved.Config, nil
+	return resolved.Config, resolved.Descriptions, nil
 }
 
 func respondConfigError(c *base.Context, err error) {

@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildComparisonSourceRows,
   buildEnvironmentTree,
   buildEnvironmentDisplayTree,
+  buildParentEnvironmentTree,
   cloneConfigValue,
   ConfigTypeMemory,
+  defaultComparisonSources,
   deepMerge,
   formatEnvironmentTreeLabel,
 } from "./config-value.js";
@@ -125,4 +128,129 @@ test("buildEnvironmentDisplayTree adds a read-only root above real environments"
       { id: 3, depth: 1, guides: [false], virtual: false },
     ],
   );
+});
+
+test("buildParentEnvironmentTree preserves every selector depth and always includes its root", () => {
+  const rows = buildParentEnvironmentTree([
+    { id: 4, parent_id: 3, name: "level-4", slug: "level-4" },
+    { id: 2, parent_id: 1, name: "level-2", slug: "level-2" },
+    { id: 1, parent_id: 0, name: "level-1", slug: "level-1" },
+    { id: 3, parent_id: 2, name: "level-3", slug: "level-3" },
+  ]);
+
+  assert.deepEqual(rows.map((row) => [row.environment.id, row.depth]), [
+    ["config-root", 0],
+    [1, 1],
+    [2, 2],
+    [3, 3],
+    [4, 4],
+  ]);
+  assert.equal(buildParentEnvironmentTree([])[0].virtual, true);
+});
+
+test("buildComparisonSourceRows keeps environment hierarchy and nests versions", () => {
+  const rows = buildComparisonSourceRows([
+    { id: 2, parent_id: 1, name: "development", slug: "dev" },
+    { id: 3, parent_id: 0, name: "production", slug: "prod" },
+    { id: 1, parent_id: 0, name: "base", slug: "base" },
+  ], [
+    { environment_id: 1, version: 1 },
+    { environment_id: 2, version: 1 },
+    { environment_id: 1, version: 2 },
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => ({
+      id: row.environment.id,
+      depth: row.depth,
+      sources: row.sources.map((source) => source.value),
+    })),
+    [
+      { id: "config-root", depth: 0, sources: [] },
+      { id: 1, depth: 1, sources: ["draft:1", "release:1:2", "release:1:1"] },
+      { id: 2, depth: 2, sources: ["draft:2", "release:2:1"] },
+      { id: 3, depth: 1, sources: ["draft:3"] },
+    ],
+  );
+  assert.equal(rows[1].sources[0].fullLabel, "base（base） · 当前草稿");
+});
+
+test("defaultComparisonSources compares a child draft with its parent draft", () => {
+  const environments = [
+    { id: 1, parent_id: 0, name: "base", slug: "base" },
+    { id: 2, parent_id: 1, name: "development", slug: "dev" },
+  ];
+
+  assert.deepEqual(defaultComparisonSources(environments, 2, []), {
+    left: "draft:1",
+    right: "draft:2",
+  });
+});
+
+test("defaultComparisonSources uses latest releases when parent or child has no draft", () => {
+  const environments = [
+    { id: 1, parent_id: 0, name: "base", slug: "base", has_draft: false },
+    { id: 2, parent_id: 1, name: "development", slug: "dev", has_draft: true },
+  ];
+  const releases = [
+    { environment_id: 1, version: 1 },
+    { environment_id: 1, version: 3 },
+    { environment_id: 2, version: 2 },
+  ];
+
+  assert.deepEqual(defaultComparisonSources(environments, 2, releases), {
+    left: "release:1:3",
+    right: "draft:2",
+  });
+
+  environments[1].has_draft = false;
+  assert.deepEqual(defaultComparisonSources(environments, 2, releases), {
+    left: "release:1:3",
+    right: "release:2:2",
+  });
+});
+
+test("defaultComparisonSources compares a root draft with its first sibling", () => {
+  const environments = [
+    { id: 1, parent_id: 0, name: "z-current", slug: "current" },
+    { id: 2, parent_id: 0, name: "a-first", slug: "first" },
+    { id: 3, parent_id: 0, name: "b-second", slug: "second" },
+  ];
+
+  assert.deepEqual(defaultComparisonSources(environments, 1, []), {
+    left: "draft:2",
+    right: "draft:1",
+  });
+});
+
+test("defaultComparisonSources uses the latest release for an isolated environment without a draft", () => {
+  const environments = [{ id: 1, parent_id: 0, name: "only", slug: "only", has_draft: false }];
+  const releases = [
+    { environment_id: 1, version: 1 },
+    { environment_id: 1, version: 3 },
+    { environment_id: 1, version: 2 },
+  ];
+
+  assert.deepEqual(defaultComparisonSources(environments, 1, releases), {
+    left: "release:1:3",
+    right: "release:1:3",
+  });
+  assert.deepEqual(defaultComparisonSources(environments, 1, []), {
+    left: "draft:1",
+    right: "draft:1",
+  });
+});
+
+test("buildComparisonSourceRows hides a draft source when the environment is fully published", () => {
+  const rows = buildComparisonSourceRows([
+    { id: 1, parent_id: 0, name: "base", slug: "base", has_draft: false },
+  ], [
+    { environment_id: 1, version: 2 },
+    { environment_id: 1, version: 1 },
+  ]);
+
+  assert.deepEqual(rows[1].sources.map((source) => source.value), [
+    "release:1:2",
+    "release:1:1",
+  ]);
 });

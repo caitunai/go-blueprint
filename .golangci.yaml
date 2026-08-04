@@ -47,6 +47,7 @@ linters:
             - github.com/gin-gonic/gin
             - github.com/redis/go-redis
             - github.com/go-redis/cache
+            - github.com/go-resty/resty
             - github.com/spf13/cobra
             - github.com/gin-contrib
             - github.com/golang-jwt/jwt

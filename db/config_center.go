@@ -780,6 +780,28 @@ func LatestPublishedConfigBySlugs(
 	environmentSlug string,
 	apiKey string,
 ) (*ConfigNamespace, *ConfigEnvironment, *PublishedConfig, error) {
+	return latestPublishedConfigBySlugs(ctx, namespaceSlug, environmentSlug, func(namespace *ConfigNamespace) error {
+		return authenticateNamespaceAPIKey(namespace, apiKey)
+	})
+}
+
+// LatestPublishedConfigBySlugsInternal is for trusted in-process consumers
+// that already have direct database access. External callers must use the
+// runtime HTTP API and authenticate with the namespace API Key.
+func LatestPublishedConfigBySlugsInternal(
+	ctx context.Context,
+	namespaceSlug string,
+	environmentSlug string,
+) (*ConfigNamespace, *ConfigEnvironment, *PublishedConfig, error) {
+	return latestPublishedConfigBySlugs(ctx, namespaceSlug, environmentSlug, nil)
+}
+
+func latestPublishedConfigBySlugs(
+	ctx context.Context,
+	namespaceSlug string,
+	environmentSlug string,
+	authenticate func(*ConfigNamespace) error,
+) (*ConfigNamespace, *ConfigEnvironment, *PublishedConfig, error) {
 	namespaceSlug = strings.ToLower(strings.TrimSpace(namespaceSlug))
 	environmentSlug = strings.ToLower(strings.TrimSpace(environmentSlug))
 	if !configSlugPattern.MatchString(namespaceSlug) {
@@ -792,12 +814,17 @@ func LatestPublishedConfigBySlugs(
 	namespace := &ConfigNamespace{}
 	if err := DB().WithContext(ctx).Where("slug = ?", namespaceSlug).First(namespace).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, nil, errors.Join(ErrConfigAPIKeyUnauthorized, err)
+			if authenticate != nil {
+				return nil, nil, nil, errors.Join(ErrConfigAPIKeyUnauthorized, err)
+			}
+			return nil, nil, nil, errors.Join(ErrConfigNamespaceNotFound, err)
 		}
 		return nil, nil, nil, errors.Join(ErrConfigStorage, err)
 	}
-	if err := authenticateNamespaceAPIKey(namespace, apiKey); err != nil {
-		return nil, nil, nil, err
+	if authenticate != nil {
+		if err := authenticate(namespace); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	environment := &ConfigEnvironment{}
 	if err := DB().WithContext(ctx).

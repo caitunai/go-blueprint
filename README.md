@@ -193,6 +193,60 @@ Responses include `X-Config-Namespace`, `X-Config-Environment`,
 use `Cache-Control: no-store` because published configuration may contain
 sensitive values.
 
+### Loading published configuration into Viper
+
+The application can merge the latest published configuration for one
+environment into Viper during `serve` startup. `.app.toml` remains the
+bootstrap source and selects either a trusted direct database read or the
+runtime HTTP API. Draft configuration is never loaded.
+
+For a direct database read, configure the loader together with the existing
+`[db]` settings:
+
+```toml
+[configload]
+enabled=true
+source="database"
+namespace="my-service"
+environment="production"
+```
+
+Database loading uses the local `[db]` connection and does not require the
+namespace API Key because it is an in-process trusted database operation. If
+the published snapshot is encrypted, the local `[configcrypt]` keyring must
+also contain the key needed to decrypt it.
+
+For HTTP loading, configure the configuration-center origin and namespace API
+Key:
+
+```toml
+[configload]
+enabled=true
+source="http"
+namespace="my-service"
+environment="production"
+
+[configload.http]
+baseURL="https://config.example.com"
+apiKey="replace-with-the-namespace-api-key"
+timeout="5s"
+```
+
+The HTTP timeout must be greater than zero and at most one minute. Redirects
+are rejected so the API Key cannot be forwarded to another origin, and the
+response body is limited to 2 MiB. Prefer supplying the API Key through the
+`CONFIGLOAD_HTTP_APIKEY` environment variable instead of committing it to a
+configuration file.
+
+Published values override ordinary `.app.toml` values, while Viper environment
+variables retain their higher precedence. The bootstrap roots `db`,
+`configcrypt`, `configcenter`, and `configload` are never accepted from the
+published payload, preventing a remote configuration from changing its own
+loader, database connection, keyring, or configuration-center authentication.
+Redis, queue, logger, server, and other application settings are initialized
+after the published configuration is merged. Loading errors stop startup rather
+than silently falling back to stale local values.
+
 For Vite hot reload, set `ui.assetMode="vite"`, run `npm run dev` in
 `storage/ui`, and keep `ui.viteDevOrigin` aligned with the Vite origin. Release
 builds must run the frontend build before compiling the Go binary because the

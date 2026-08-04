@@ -153,8 +153,8 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 	})
 }
 
-func (c *Context) UnauthorizedAPIKey(message string, data gin.H) {
-	c.Header("WWW-Authenticate", `ApiKey realm="config-center"`)
+func (c *Context) UnauthorizedAPIKey(realm, message string, data gin.H) {
+	c.Header("WWW-Authenticate", "ApiKey realm="+strconv.Quote(realm))
 	c.JSON(http.StatusUnauthorized, gin.H{
 		KeyStatus:  http.StatusUnauthorized,
 		KeyMessage: message,

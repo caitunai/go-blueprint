@@ -15,7 +15,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-const configCenterEntry = "src/config-center/main.js"
+const (
+	configCenterEntry = "src/config-center/main.js"
+	configAPIKeyRealm = "api"
+)
 
 const (
 	keyConfigNamespace   = "namespace"
@@ -505,7 +508,7 @@ func respondConfigError(c *base.Context, err error) {
 	case errors.Is(err, db.ErrConfigAPIKeyInvalid):
 		c.ErrorForm("API Key 必须包含 32 至 256 个 URL 安全字符", gin.H{})
 	case errors.Is(err, db.ErrConfigAPIKeyUnauthorized):
-		c.UnauthorizedAPIKey("API Key 无效", gin.H{})
+		c.UnauthorizedAPIKey(configAPIKeyRealm, "API Key 无效", gin.H{})
 	case errors.Is(err, db.ErrConfigEncryptionRequired):
 		c.ErrorMessage("配置加密未启用，无法安全保存 API Key")
 	case errors.Is(err, db.ErrConfigEnvironmentNotFound):

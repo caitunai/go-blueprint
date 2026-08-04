@@ -511,7 +511,7 @@ function configCenterApp() {
     environmentModal: false, environmentSaving: false, parentSelectorOpen: false,
     sidebarHidden: false, confirming: false,
     toasts: [], toastSequence: 0,
-    namespaceForm: { id: 0, name: "", slug: "", description: "" },
+    namespaceForm: { id: 0, name: "", slug: "", description: "", api_key: "", api_key_configured: false },
     environmentForm: { id: 0, name: "", slug: "", description: "", parent_id: 0 },
     confirmation: {
       open: false, kind: "", title: "", message: "", confirmLabel: "确认", tone: "primary", targetID: 0, targetNamespaceID: 0, targets: [], urlMode: "push",
@@ -791,8 +791,8 @@ function configCenterApp() {
     openNamespaceModal(namespace = null) {
       this.namespaceMenu = false;
       this.namespaceForm = namespace
-        ? { id: namespace.id, name: namespace.name, slug: namespace.slug, description: namespace.description }
-        : { id: 0, name: "", slug: "", description: "" };
+        ? { id: namespace.id, name: namespace.name, slug: namespace.slug, description: namespace.description, api_key: "", api_key_configured: Boolean(namespace.api_key_configured) }
+        : { id: 0, name: "", slug: "", description: "", api_key: "", api_key_configured: false };
       this.namespaceModal = true;
     },
     closeNamespaceModal() {
@@ -807,6 +807,7 @@ function configCenterApp() {
           name: this.namespaceForm.name,
           slug: this.namespaceForm.slug,
           description: this.namespaceForm.description,
+          api_key: this.namespaceForm.api_key,
         };
         const data = await api(id ? `/namespaces/${id}` : "/namespaces", { method: id ? "PUT" : "POST", body });
         this.namespaceModal = false;

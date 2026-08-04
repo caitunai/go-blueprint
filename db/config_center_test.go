@@ -3,9 +3,12 @@ package db
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/caitunai/go-blueprint/services/configcrypt"
 )
 
 const (
@@ -18,6 +21,65 @@ const (
 	testService            = "service"
 	testServiceHostPointer = "/service/host"
 )
+
+func TestNamespaceAPIKeyIsEncryptedAndAuthenticated(t *testing.T) {
+	keyringPath := filepath.Join(t.TempDir(), "keys.json")
+	if err := configcrypt.GenerateFileKey(keyringPath, "namespace-test-key"); err != nil {
+		t.Fatalf("GenerateFileKey() error = %v", err)
+	}
+	if err := configcrypt.Configure(configcrypt.Settings{
+		Enabled:     true,
+		Provider:    configcrypt.ProviderFile,
+		ActiveKeyID: "namespace-test-key",
+		KeyringPath: keyringPath,
+	}); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := configcrypt.Configure(configcrypt.Settings{}); err != nil {
+			t.Fatalf("reset Configure() error = %v", err)
+		}
+	})
+
+	apiKey := strings.Repeat("a", minConfigAPIKeyLength)
+	stored, err := encryptNamespaceAPIKey(apiKey, 7)
+	if err != nil {
+		t.Fatalf("encryptNamespaceAPIKey() error = %v", err)
+	}
+	if stored == apiKey || strings.Contains(stored, apiKey) {
+		t.Fatal("encryptNamespaceAPIKey() stored plaintext API key")
+	}
+	namespace := &ConfigNamespace{ID: 7, APIKey: stored}
+	publicView, err := json.Marshal(namespace)
+	if err != nil {
+		t.Fatalf("Marshal() namespace error = %v", err)
+	}
+	if strings.Contains(string(publicView), stored) || strings.Contains(string(publicView), apiKey) {
+		t.Fatal("ConfigNamespace JSON exposed API key material")
+	}
+	if err := authenticateNamespaceAPIKey(namespace, apiKey); err != nil {
+		t.Fatalf("authenticateNamespaceAPIKey() error = %v", err)
+	}
+	if err := authenticateNamespaceAPIKey(namespace, strings.Repeat("b", minConfigAPIKeyLength)); !errors.Is(err, ErrConfigAPIKeyUnauthorized) {
+		t.Fatalf("authenticateNamespaceAPIKey() error = %v, want ErrConfigAPIKeyUnauthorized", err)
+	}
+}
+
+func TestValidateNamespaceAPIKey(t *testing.T) {
+	t.Parallel()
+	base := ConfigNamespaceInput{Name: "Service", Slug: testService}
+	if err := validateConfigNamespaceInput(base, true); !errors.Is(err, ErrConfigAPIKeyInvalid) {
+		t.Fatalf("validateConfigNamespaceInput() missing key error = %v", err)
+	}
+	base.APIKey = strings.Repeat("a", minConfigAPIKeyLength)
+	if err := validateConfigNamespaceInput(base, true); err != nil {
+		t.Fatalf("validateConfigNamespaceInput() error = %v", err)
+	}
+	base.APIKey = strings.Repeat("a", minConfigAPIKeyLength-1)
+	if err := validateConfigNamespaceInput(base, false); !errors.Is(err, ErrConfigAPIKeyInvalid) {
+		t.Fatalf("validateConfigNamespaceInput() short key error = %v", err)
+	}
+}
 
 func TestDecodeConfigPreservesSupportedTypes(t *testing.T) {
 	t.Parallel()
@@ -269,13 +331,13 @@ func TestConfigNamespaceInputNormalizationAndValidation(t *testing.T) {
 	if input.Name != "Order Service" || input.Slug != "order-service" || input.Description != "order configuration" {
 		t.Fatalf("normalizeConfigNamespaceInput() = %#v", input)
 	}
-	if err := validateConfigNamespaceInput(input); err != nil {
+	if err := validateConfigNamespaceInput(input, false); err != nil {
 		t.Fatalf("validateConfigNamespaceInput() error = %v", err)
 	}
 
 	invalid := input
 	invalid.Slug = "invalid namespace"
-	if err := validateConfigNamespaceInput(invalid); !errors.Is(err, ErrConfigNamespaceInvalid) {
+	if err := validateConfigNamespaceInput(invalid, false); !errors.Is(err, ErrConfigNamespaceInvalid) {
 		t.Fatalf("validateConfigNamespaceInput() error = %v, want ErrConfigNamespaceInvalid", err)
 	}
 }

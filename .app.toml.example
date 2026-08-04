@@ -7,6 +7,17 @@ key="key_must_length_32"
 assetMode="embedded"
 viteDevOrigin="http://127.0.0.1:5173"
 
+[configcenter]
+enabled=false
+username=""
+password=""
+
+[configcrypt]
+enabled=true
+provider="file"
+activeKey="config-key-v1"
+keyring="/absolute/path/to/config-center-keys.json"
+
 [logger]
 level="info"
 

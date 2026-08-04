@@ -9,6 +9,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/services/configformat"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -29,6 +30,7 @@ type configNamespaceForm struct {
 	Name        string `json:"name" binding:"required"`
 	Slug        string `json:"slug" binding:"required"`
 	Description string `json:"description"`
+	APIKey      string `json:"api_key"`
 }
 
 type configEnvironmentForm struct {
@@ -80,6 +82,10 @@ func ConfigCenterControl(r *base.Router) {
 	r.GET("/namespaces/:namespace_id/environments/:id/releases/:version", getConfigRelease)
 	r.GET("/namespaces/:namespace_id/releases", listAllConfigReleases)
 	r.POST("/namespaces/:namespace_id/publish", publishConfigs)
+}
+
+func ConfigCenterRuntimeControl(r *base.Router) {
+	r.GET("/runtime/:namespace/:environment", getPublishedEnvironmentConfig)
 }
 
 func listConfigNamespaces(c *base.Context) {
@@ -300,6 +306,69 @@ func getPublishedConfig(c *base.Context) {
 	c.Success(gin.H{"release": published})
 }
 
+func getPublishedEnvironmentConfig(c *base.Context) {
+	outputFormat, err := configformat.Parse(c.Query("format"))
+	if err != nil {
+		c.ErrorForm("输出格式不支持，可使用 json、yaml、toml、env 或 ini", gin.H{})
+		return
+	}
+	namespace, environment, published, err := db.LatestPublishedConfigBySlugs(
+		c.Request.Context(),
+		c.Param("namespace"),
+		c.Param("environment"),
+		c.GetHeader("X-API-Key"),
+	)
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	setPublishedConfigHeaders(c, namespace.Slug, environment.Slug, published)
+	if outputFormat == configformat.JSON {
+		c.Success(gin.H{
+			keyConfigNamespace: gin.H{
+				"name": namespace.Name,
+				"slug": namespace.Slug,
+			},
+			keyConfigEnvironment: gin.H{
+				"name": environment.Name,
+				"slug": environment.Slug,
+			},
+			"version":      published.Version,
+			"batch_id":     published.BatchID,
+			"published_at": published.PublishedAt,
+			"config":       published.Config,
+			"descriptions": published.Descriptions,
+		})
+		return
+	}
+	output, err := configformat.Render(
+		published.Config,
+		map[string]string(published.Descriptions),
+		outputFormat,
+	)
+	if err != nil {
+		log.Ctx(c.Request.Context()).Error().Err(err).Msg("format published configuration failed")
+		c.ErrorMessage("配置格式转换失败")
+		return
+	}
+	c.Header(
+		"Content-Disposition",
+		"inline; filename=\""+namespace.Slug+"-"+environment.Slug+"-v"+
+			strconv.FormatUint(published.Version, 10)+"."+outputFormat.Extension()+"\"",
+	)
+	c.Data(http.StatusOK, outputFormat.ContentType(), output)
+}
+
+func setPublishedConfigHeaders(c *base.Context, namespaceSlug, environmentSlug string, published *db.PublishedConfig) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Config-Namespace", namespaceSlug)
+	c.Header("X-Config-Environment", environmentSlug)
+	c.Header("X-Config-Version", strconv.FormatUint(published.Version, 10))
+	c.Header("X-Config-Batch", published.BatchID)
+	c.Header("Last-Modified", published.PublishedAt.UTC().Format(http.TimeFormat))
+}
+
 func listConfigReleases(c *base.Context) {
 	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
@@ -401,6 +470,7 @@ func configNamespaceInput(form *configNamespaceForm) db.ConfigNamespaceInput {
 		Name:        form.Name,
 		Slug:        form.Slug,
 		Description: form.Description,
+		APIKey:      form.APIKey,
 	}
 }
 
@@ -432,6 +502,12 @@ func respondConfigError(c *base.Context, err error) {
 		c.Conflict("命名空间标识已存在", gin.H{})
 	case errors.Is(err, db.ErrConfigNamespaceInvalid):
 		c.ErrorForm("命名空间信息不合法", gin.H{keyConfigReason: err.Error()})
+	case errors.Is(err, db.ErrConfigAPIKeyInvalid):
+		c.ErrorForm("API Key 必须包含 32 至 256 个 URL 安全字符", gin.H{})
+	case errors.Is(err, db.ErrConfigAPIKeyUnauthorized):
+		c.UnauthorizedAPIKey("API Key 无效", gin.H{})
+	case errors.Is(err, db.ErrConfigEncryptionRequired):
+		c.ErrorMessage("配置加密未启用，无法安全保存 API Key")
 	case errors.Is(err, db.ErrConfigEnvironmentNotFound):
 		c.NotFound("配置环境不存在", gin.H{})
 	case errors.Is(err, db.ErrConfigReleaseNotFound):

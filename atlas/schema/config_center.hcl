@@ -20,6 +20,10 @@ table "gb_config_namespaces" {
     type    = varchar(500)
     default = ""
   }
+  column "api_key" {
+    null = false
+    type = mediumtext
+  }
   column "created_at" {
     null    = false
     type    = timestamp

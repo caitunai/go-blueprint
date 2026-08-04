@@ -153,6 +153,15 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 	})
 }
 
+func (c *Context) UnauthorizedAPIKey(message string, data gin.H) {
+	c.Header("WWW-Authenticate", `ApiKey realm="config-center"`)
+	c.JSON(http.StatusUnauthorized, gin.H{
+		KeyStatus:  http.StatusUnauthorized,
+		KeyMessage: message,
+		KeyData:    data,
+	})
+}
+
 func (c *Context) Forbidden(message string, data gin.H) {
 	c.response(http.StatusForbidden, gin.H{
 		KeyStatus:  http.StatusForbidden,

@@ -454,6 +454,7 @@
       <form class="mt-6 space-y-5" @submit.prevent="saveNamespace()">
         <label class="field-label">命名空间名称<input class="text-input mt-2" maxlength="100" required x-model.trim="namespaceForm.name" placeholder="例如：订单服务"></label>
         <label class="field-label">命名空间标识<input class="text-input mt-2 font-mono" maxlength="64" required x-model.trim="namespaceForm.slug" placeholder="order-service"><span class="field-help">全局唯一，小写字母开头，可包含数字、- 和 _</span></label>
+        <label class="field-label">API Key<input type="password" class="text-input mt-2 font-mono" minlength="32" maxlength="256" pattern="[A-Za-z0-9._~\-]{32,256}" :required="!namespaceForm.id || !namespaceForm.api_key_configured" x-model="namespaceForm.api_key" autocomplete="new-password" spellcheck="false" placeholder="至少 32 个 URL 安全字符"><span class="field-help" x-text="namespaceForm.api_key_configured ? '已安全配置；留空保持不变，填写新值可轮换' : '用于读取此命名空间的已发布配置，保存后不会再次显示'"></span></label>
         <label class="field-label">说明<textarea class="text-input mt-2 min-h-24 resize-y" maxlength="500" x-model.trim="namespaceForm.description" placeholder="说明这个命名空间包含的项目或业务"></textarea></label>
         <div class="flex items-center justify-between gap-3 pt-2">
           <button x-show="namespaceForm.id" type="button" class="btn-danger-ghost" :disabled="namespaceSaving" @click="deleteSelectedNamespace()">删除命名空间</button>

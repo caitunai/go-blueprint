@@ -73,9 +73,26 @@ GOOS=linux GOARCH=amd64 go build
 
 ## Configuration Center
 
-The built-in configuration center is available at `/config-center` and does not
-require authentication. It supports visual editing for objects, arrays,
-strings, booleans, and JSON numbers. Environments can inherit
+The built-in configuration center is disabled by default. Enable it and set
+the mandatory Basic Auth credentials in `.app.toml` before using the management
+page or any configuration-center API:
+
+```toml
+[configcenter]
+enabled=true
+username="config-admin"
+password="replace-with-at-least-16-random-characters"
+```
+
+The username must be 1-128 characters, without surrounding whitespace or a
+colon. The password must be 16-256 characters. Startup fails if the feature is
+enabled with invalid credentials. When disabled, `/config-center` and all
+routes below it return `404`. Basic Auth protects the management page and
+management APIs; always expose them through HTTPS because Basic Auth encodes
+credentials but does not encrypt them.
+
+The management UI is available at `/config-center`. It supports visual editing
+for objects, arrays, strings, booleans, and JSON numbers. Environments can inherit
 from one parent environment; objects merge recursively, while arrays and scalar
 values replace the inherited value.
 
@@ -86,6 +103,95 @@ transaction. Apply the Atlas migrations before first use:
 ```shell
 atlas migrate apply --env local
 ```
+
+### Configuration encryption
+
+Draft configurations, draft descriptions, published configurations, and
+published descriptions support application-layer envelope encryption. The
+external keyring must not be stored in this repository, in the configuration
+center database, or in a configuration namespace. The application config only
+contains the provider, active key ID, and absolute keyring path:
+
+```toml
+[configcrypt]
+enabled=true
+provider="file"
+activeKey="config-key-v1"
+keyring="/run/secrets/config-center/keys.json"
+```
+
+Generate the first AES-256 key without printing the key material to the
+terminal. The command creates or updates the keyring with `0600` permissions:
+
+```shell
+go run . config-key generate --config .app.toml --id config-key-v1
+```
+
+After enabling encryption on a database that already contains configuration
+data, encrypt legacy plaintext records:
+
+```shell
+go run . config-key reencrypt --config .app.toml
+```
+
+To rotate the key-encryption key, generate a new key ID in the same external
+keyring, update `activeKey`, restart the service, and run `reencrypt` again:
+
+```shell
+go run . config-key generate --config .app.toml --id config-key-v2
+# Update activeKey to config-key-v2 and restart the service.
+go run . config-key reencrypt --config .app.toml
+```
+
+The re-encryption command rewraps stored data-encryption keys with the active
+key and can be safely rerun. Keep old keys in the external keyring until all
+records are migrated and backups encrypted under those keys have expired. A
+lost key cannot be recovered from the database.
+
+### Published configuration API
+
+Applications can read the latest published, fully resolved configuration by
+namespace and environment slug. Draft values are never returned by this API:
+
+```text
+GET /config-center/api/runtime/{namespace}/{environment}?format=json
+```
+
+Supported formats are `json` (default), `yaml`, `toml`, `env`, and `ini`.
+JSON uses the normal API response envelope and exposes configuration under
+`data.config` with descriptions under `data.descriptions`. Text formats return
+the configuration directly and include descriptions as comments.
+
+Every namespace has its own API Key. It is accepted only through the
+`X-API-Key` request header, is never returned by the namespace API, and is
+stored with the same external-keyring envelope encryption used by configuration
+payloads. Creating a namespace requires a 32-256 character URL-safe API Key.
+When editing a namespace, leave the field empty to keep the existing key or
+enter a new value to rotate it. Existing namespaces deny runtime API access
+until an API Key has been configured. The runtime API does not require the
+management Basic Auth credentials, but it is available only while
+`configcenter.enabled=true` and still requires the namespace `X-API-Key`.
+
+Open the management API with Basic Auth, for example:
+
+```shell
+curl --user 'config-admin:replace-with-the-config-center-password' \
+  'https://config.example.com/config-center/api/namespaces'
+```
+
+```shell
+curl -H 'Accept: application/json' \
+  -H 'X-API-Key: replace-with-the-namespace-api-key' \
+  'http://127.0.0.1:8080/config-center/api/runtime/my-service/production'
+
+curl -H 'X-API-Key: replace-with-the-namespace-api-key' \
+  'http://127.0.0.1:8080/config-center/api/runtime/my-service/production?format=yaml'
+```
+
+Responses include `X-Config-Namespace`, `X-Config-Environment`,
+`X-Config-Version`, `X-Config-Batch`, and `Last-Modified` metadata headers and
+use `Cache-Control: no-store` because published configuration may contain
+sensitive values.
 
 For Vite hot reload, set `ui.assetMode="vite"`, run `npm run dev` in
 `storage/ui`, and keep `ui.viteDevOrigin` aligned with the Vite origin. Release

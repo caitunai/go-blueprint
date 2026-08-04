@@ -2,6 +2,8 @@ package route
 
 import (
 	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"os"
@@ -18,14 +20,25 @@ import (
 )
 
 var (
-	jwtSecret         []byte
-	publicKey         *rsa.PublicKey
-	oauthCallbackPath = "oauth/path/to/callback"
+	jwtSecret                  []byte
+	publicKey                  *rsa.PublicKey
+	oauthCallbackPath          = "oauth/path/to/callback"
+	configCenterIsEnabled      bool
+	configCenterUsernameDigest [sha256.Size]byte
+	configCenterPasswordDigest [sha256.Size]byte
 )
 
-const unauthorizedMessage = "unauthorized"
+const (
+	unauthorizedMessage    = "unauthorized"
+	configCenterBasicRealm = `Basic realm="config-center", charset="UTF-8"`
+)
 
 func InitMiddleware() {
+	configureConfigCenterAccess(
+		viper.GetBool("configcenter.enabled"),
+		viper.GetString("configcenter.username"),
+		viper.GetString("configcenter.password"),
+	)
 	jwtSecret = []byte(viper.GetString("auth.api.secret"))
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
 	if err != nil {
@@ -37,6 +50,37 @@ func InitMiddleware() {
 		log.Error().Err(err).Msg("parse oauth public key failed")
 		return
 	}
+}
+
+func configureConfigCenterAccess(enabled bool, username, password string) {
+	configCenterIsEnabled = enabled
+	configCenterUsernameDigest = sha256.Sum256([]byte(username))
+	configCenterPasswordDigest = sha256.Sum256([]byte(password))
+}
+
+func configCenterEnabled(c *base.Context) {
+	if !configCenterIsEnabled {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	c.Next()
+}
+
+func configCenterBasicAuth(c *base.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Vary", "Authorization")
+	username, password, ok := c.Request.BasicAuth()
+	usernameDigest := sha256.Sum256([]byte(username))
+	passwordDigest := sha256.Sum256([]byte(password))
+	usernameMatches := subtle.ConstantTimeCompare(usernameDigest[:], configCenterUsernameDigest[:])
+	passwordMatches := subtle.ConstantTimeCompare(passwordDigest[:], configCenterPasswordDigest[:])
+	authorized := usernameMatches&passwordMatches == 1
+	if !ok || !authorized {
+		c.Header("WWW-Authenticate", configCenterBasicRealm)
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+	c.Next()
 }
 
 // This middleware can be used to verify the login status of real users.
@@ -67,15 +111,17 @@ func apiAuthorized(c *base.Context) {
 
 func AttemptAuth() base.HandlerFunc {
 	return func(c *base.Context) {
+		if isConfigCenterPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		var uid uint64
 		id, _ := c.DecodeCookie("session_id")
 		if id != "" {
 			uid, _ = strconv.ParseUint(id, 10, 64)
 		}
 		if uid == 0 {
-			bearerToken := c.GetHeader("Authorization")
-			bearerToken = strings.TrimPrefix(bearerToken, "Bearer")
-			bearerToken = strings.TrimSpace(bearerToken)
+			bearerToken := getBearerToken(c.GetHeader("Authorization"))
 			if bearerToken != "" {
 				var accountID uint64
 				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
@@ -91,7 +137,7 @@ func AttemptAuth() base.HandlerFunc {
 					return publicKey, nil
 				})
 				if err != nil {
-					log.Error().Err(err).Msgf("parse token error: %s", bearerToken)
+					log.Error().Err(err).Msg("parse bearer token error")
 					accountID = 0
 				} else {
 					sub, err := token.Claims.GetSubject()
@@ -142,6 +188,18 @@ func AttemptAuth() base.HandlerFunc {
 		c.Set("uid", uint(uid))
 		c.Next()
 	}
+}
+
+func isConfigCenterPath(path string) bool {
+	return path == "/config-center" || strings.HasPrefix(path, "/config-center/")
+}
+
+func getBearerToken(authorization string) string {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(authorization), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(token)
 }
 
 func AuthorizedAllowSpider() base.HandlerFunc {

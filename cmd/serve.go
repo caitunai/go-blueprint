@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/caitunai/go-blueprint/api/server"
 	"github.com/caitunai/go-blueprint/cache"
+	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
 	"github.com/rs/zerolog/log"
@@ -15,6 +16,16 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Command to start api server",
 	Long:  "Start the server, you should set the config file, named: .app.toml",
+	PreRunE: func(_ *cobra.Command, _ []string) error {
+		if err := validateConfigCenterSettings(); err != nil {
+			return err
+		}
+		if err := configureConfigEncryption(); err != nil {
+			return err
+		}
+		db.Conn()
+		return nil
+	},
 	Run: func(cmd *cobra.Command, _ []string) {
 		redis.Init()
 		cache.InitCache()

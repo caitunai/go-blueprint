@@ -80,10 +80,12 @@ button:disabled { @apply cursor-not-allowed opacity-50; }
 .config-collection-nested { @apply pl-1; }
 .config-node { @apply border-b border-slate-100 last:border-b-0; }
 .config-row { @apply flex min-h-12 flex-wrap items-center gap-2 px-1 py-2; }
+.config-row-long-text { @apply items-start; }
 .config-index { @apply grid h-8 w-10 shrink-0 place-items-center rounded-md bg-slate-100 font-mono text-xs text-slate-500; }
 .config-key { @apply h-9 min-w-0 flex-[1_1_180px] rounded-md border border-slate-200 bg-white px-3 font-mono text-xs text-slate-800 transition focus:border-indigo-400; }
 .config-value { @apply h-9 min-w-0 flex-[1_1_150px] rounded-md border border-slate-200 bg-white px-3 font-mono text-xs text-slate-800 focus:border-indigo-400; }
 textarea.config-value { @apply min-h-16 resize-y py-2; }
+.config-value-long-text { @apply min-h-24 resize-y py-2 leading-5; }
 .config-summary { @apply min-w-0 flex-[1_1_120px] text-xs text-slate-400; }
 .config-actions { @apply ml-auto flex shrink-0 items-center gap-1; }
 .config-action { @apply grid h-8 w-8 place-items-center rounded-md text-sm text-slate-400 transition hover:bg-slate-100 hover:text-slate-700; }

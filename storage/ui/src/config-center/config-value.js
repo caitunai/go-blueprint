@@ -153,10 +153,12 @@ function preferredComparisonSource(environment, releases) {
 export class ConfigTypeMemory {
   constructor() {
     this.values = new Map();
+    this.types = new Map();
   }
 
   clear() {
     this.values.clear();
+    this.types.clear();
   }
 
   remember(path, type, value) {
@@ -172,6 +174,31 @@ export class ConfigTypeMemory {
       ? cloneConfigValue(rememberedTypes.get(type))
       : cloneConfigValue(fallback);
   }
+
+  select(path, type) {
+    this.types.set(JSON.stringify(path), type);
+  }
+
+  resolve(path, value) {
+    const storedType = configValueType(value);
+    if (storedType !== "string") return storedType;
+
+    const selectedType = this.types.get(JSON.stringify(path));
+    if (selectedType === "string" || selectedType === "long_text") return selectedType;
+    return value.includes("\n") || value.includes("\r") ? "long_text" : "string";
+  }
+}
+
+export function configValueType(value) {
+  if (Array.isArray(value)) return "array";
+  if (value !== null && typeof value === "object") return "object";
+  if (typeof value === "boolean") return "bool";
+  if (typeof value === "number") return "number";
+  return "string";
+}
+
+export function defaultConfigValue(type) {
+  return { object: {}, array: [], string: "", long_text: "", bool: false, number: 0 }[type];
 }
 
 function isPlainConfigObject(value) {

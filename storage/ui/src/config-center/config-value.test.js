@@ -8,6 +8,8 @@ import {
   buildParentEnvironmentTree,
   cloneConfigValue,
   ConfigTypeMemory,
+  configValueType,
+  defaultConfigValue,
   defaultComparisonSources,
   deepMerge,
   formatEnvironmentTreeLabel,
@@ -105,6 +107,26 @@ test("ConfigTypeMemory restores the last value used by each type", () => {
 
   memory.clear();
   assert.deepEqual(memory.restore(path, "object", {}), {});
+});
+
+test("ConfigTypeMemory keeps long text as an editor type while storing a string", () => {
+  const memory = new ConfigTypeMemory();
+  const path = ["service", "template"];
+
+  assert.equal(memory.resolve(path, "one line"), "string");
+  assert.equal(memory.resolve(path, "first line\nsecond line"), "long_text");
+
+  memory.select(path, "long_text");
+  memory.remember(path, "long_text", "editable one-line text");
+  assert.equal(memory.resolve(path, "editable one-line text"), "long_text");
+  assert.equal(memory.restore(path, "long_text", ""), "editable one-line text");
+
+  memory.select(path, "string");
+  assert.equal(memory.resolve(path, "plain text"), "string");
+  assert.equal(configValueType(defaultConfigValue("long_text")), "string");
+
+  memory.clear();
+  assert.equal(memory.resolve(path, "plain text"), "string");
 });
 
 test("buildEnvironmentDisplayTree adds a read-only root above real environments", () => {

@@ -5,6 +5,7 @@ import {
   buildParentEnvironmentTree,
   cloneConfigValue,
   ConfigTypeMemory,
+  defaultConfigValue,
   defaultComparisonSources,
 } from "./config-value.js";
 import {
@@ -92,10 +93,12 @@ class ConfigTreeEditor {
 
   renderNode(parentPath, key, value, parentIsArray, index, length) {
     const path = [...parentPath, key];
+    const type = this.typeMemory.resolve(path, value);
     const wrapper = document.createElement("div");
     wrapper.className = "config-node";
     const row = document.createElement("div");
     row.className = "config-row";
+    row.classList.toggle("config-row-long-text", type === "long_text");
 
     if (parentIsArray) {
       const indexLabel = document.createElement("span");
@@ -114,19 +117,20 @@ class ConfigTreeEditor {
 
     const typeOptions = [
       ["object", "对象"], ["array", "数组"], ["string", "字符串"],
-      ["bool", "布尔值"], ["number", "数字"],
+      ["long_text", "长文本"], ["bool", "布尔值"], ["number", "数字"],
     ].map(([optionValue, label]) => ({ value: optionValue, label }));
     const typeDropdown = this.dropdown({
-      value: valueType(value),
+      value: type,
       options: typeOptions,
       className: "config-type-dropdown",
       ariaLabel: "配置值类型",
       onChange: (nextType) => {
-        const previousType = valueType(this.at(path));
+        const previousType = this.typeMemory.resolve(path, this.at(path));
         if (previousType === nextType) return;
         this.typeMemory.remember(path, previousType, this.at(path));
         this.rememberDescriptionSubtree(path, previousType);
-        this.replace(path, this.typeMemory.restore(path, nextType, defaultValue(nextType)));
+        this.typeMemory.select(path, nextType);
+        this.replace(path, this.typeMemory.restore(path, nextType, defaultConfigValue(nextType)));
         this.descriptions = removeDescriptionSubtree(this.descriptions, path, true);
         this.restoreDescriptionSubtree(path, nextType);
         this.commit();
@@ -134,7 +138,7 @@ class ConfigTreeEditor {
     });
     row.append(typeDropdown);
 
-    row.append(this.renderValueInput(path, value));
+    row.append(this.renderValueInput(path, value, type));
 
     const actions = document.createElement("div");
     actions.className = "config-actions";
@@ -286,8 +290,7 @@ class ConfigTreeEditor {
     document.removeEventListener("keydown", this.handleDescriptionKeyDown);
   }
 
-  renderValueInput(path, value) {
-    const type = valueType(value);
+  renderValueInput(path, value, type) {
     if (type === "object" || type === "array") {
       const summary = document.createElement("span");
       summary.className = "config-summary";
@@ -310,18 +313,25 @@ class ConfigTreeEditor {
         },
       });
     }
-    const input = document.createElement(type === "string" && String(value).length > 80 ? "textarea" : "input");
+    const input = document.createElement(type === "long_text" ? "textarea" : "input");
     input.className = "config-value";
     if (type === "number") {
       input.type = "number";
       input.step = "any";
     } else {
-      input.type = "text";
+      if (type === "long_text") {
+        input.classList.add("config-value-long-text");
+        input.rows = 4;
+        input.placeholder = "输入支持换行的长文本";
+        input.setAttribute("aria-label", "长文本配置值");
+      } else {
+        input.type = "text";
+      }
       input.maxLength = 65536;
     }
     input.value = String(value);
     input.addEventListener("input", () => {
-      if (type === "string") {
+      if (type === "string" || type === "long_text") {
         this.replace(path, input.value);
         this.onChange(cloneConfigValue(this.value), { ...this.descriptions }, false);
       }
@@ -1218,19 +1228,8 @@ async function api(path, options = {}) {
 }
 
 function isCollection(value) { return Array.isArray(value) || (value !== null && typeof value === "object"); }
-function valueType(value) {
-  if (Array.isArray(value)) return "array";
-  if (value !== null && typeof value === "object") return "object";
-  if (typeof value === "boolean") return "bool";
-  if (typeof value === "number") return "number";
-  return "string";
-}
-
 function configIsEmpty(config) {
   return !config || Object.keys(config).length === 0;
-}
-function defaultValue(type) {
-  return { object: {}, array: [], string: "", bool: false, number: 0 }[type];
 }
 window.configCenterApp = configCenterApp;
 window.Alpine = Alpine;

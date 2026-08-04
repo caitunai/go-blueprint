@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	configLockUpdate           = "UPDATE"
 	MaxConfigBytes             = 512 * 1024
 	MaxConfigDescriptionBytes  = 512 * 1024
 	maxConfigDepth             = 32
@@ -28,10 +29,14 @@ const (
 	maxConfigStringLength      = 64 * 1024
 	maxConfigDescriptionLength = 2000
 	maxConfigEnvironments      = 100
+	maxConfigNamespaces        = 50
 	maxEnvironmentDepth        = 16
 )
 
 var (
+	ErrConfigNamespaceNotFound   = errors.New("config namespace not found")
+	ErrConfigNamespaceInvalid    = errors.New("invalid config namespace")
+	ErrConfigNamespaceConflict   = errors.New("config namespace conflicts with existing data")
 	ErrConfigEnvironmentNotFound = errors.New("config environment not found")
 	ErrConfigInvalid             = errors.New("invalid configuration")
 	ErrConfigEnvironmentInvalid  = errors.New("invalid config environment")
@@ -40,8 +45,20 @@ var (
 	ErrConfigReleaseNotFound     = errors.New("published configuration not found")
 	ErrConfigStorage             = errors.New("config storage operation failed")
 
-	environmentSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	configSlugPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 )
+
+// ConfigNamespace is the top-level boundary for a group of configuration
+// environments. Deleting it cascades to environments and their releases.
+type ConfigNamespace struct {
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Name             string    `gorm:"size:100;not null" json:"name"`
+	Slug             string    `gorm:"size:64;not null;uniqueIndex" json:"slug"`
+	Description      string    `gorm:"size:500;not null;default:''" json:"description"`
+	ID               uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	EnvironmentCount int64     `gorm:"-" json:"environment_count"`
+}
 
 // ConfigEnvironment stores only the overrides owned by an environment. The
 // final configuration is resolved by merging each ancestor from root to leaf.
@@ -49,11 +66,12 @@ type ConfigEnvironment struct {
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	Name              string    `gorm:"size:100;not null" json:"name"`
-	Slug              string    `gorm:"size:64;not null;uniqueIndex" json:"slug"`
+	Slug              string    `gorm:"size:64;not null;uniqueIndex:idx_config_environment_namespace_slug" json:"slug"`
 	Description       string    `gorm:"size:500;not null;default:''" json:"description"`
 	DraftConfig       string    `gorm:"type:mediumtext;not null" json:"-"`
 	DraftDescriptions string    `gorm:"type:mediumtext;not null" json:"-"`
 	ID                uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	NamespaceID       uint      `gorm:"not null;uniqueIndex:idx_config_environment_namespace_slug" json:"namespace_id"`
 	ParentID          uint      `gorm:"not null;default:0;index" json:"parent_id"`
 	Version           uint64    `gorm:"-" json:"published_version"`
 	HasDraft          bool      `gorm:"-" json:"has_draft"`
@@ -76,6 +94,12 @@ type ConfigEnvironmentInput struct {
 	Slug        string
 	Description string
 	ParentID    uint
+}
+
+type ConfigNamespaceInput struct {
+	Name        string
+	Slug        string
+	Description string
 }
 
 type ResolvedConfig struct {
@@ -108,13 +132,131 @@ type ConfigPublishResult struct {
 	Releases []PublishedConfig `json:"releases"`
 }
 
-func ListConfigEnvironments(ctx context.Context) ([]ConfigEnvironment, error) {
-	return listConfigEnvironments(ctx, DB())
+func ListConfigNamespaces(ctx context.Context) ([]ConfigNamespace, error) {
+	namespaces := make([]ConfigNamespace, 0)
+	if err := DB().WithContext(ctx).Order("name ASC, id ASC").Find(&namespaces).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	counts := make([]struct {
+		NamespaceID uint
+		Count       int64
+	}, 0)
+	if err := DB().WithContext(ctx).
+		Model(&ConfigEnvironment{}).
+		Select("namespace_id, COUNT(*) AS count").
+		Group("namespace_id").
+		Scan(&counts).Error; err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	countByNamespace := make(map[uint]int64, len(counts))
+	for _, count := range counts {
+		countByNamespace[count.NamespaceID] = count.Count
+	}
+	for index := range namespaces {
+		namespaces[index].EnvironmentCount = countByNamespace[namespaces[index].ID]
+	}
+	return namespaces, nil
 }
 
-func listConfigEnvironments(ctx context.Context, conn *gorm.DB) ([]ConfigEnvironment, error) {
+func CreateConfigNamespace(ctx context.Context, input ConfigNamespaceInput) (*ConfigNamespace, error) {
+	input = normalizeConfigNamespaceInput(input)
+	if err := validateConfigNamespaceInput(input); err != nil {
+		return nil, err
+	}
+	created := &ConfigNamespace{
+		Name:        input.Name,
+		Slug:        input.Slug,
+		Description: input.Description,
+	}
+	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&ConfigNamespace{}).Count(&count).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if count >= maxConfigNamespaces {
+			return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace limit reached"))
+		}
+		var existing int64
+		if err := tx.Model(&ConfigNamespace{}).Where("slug = ?", input.Slug).Count(&existing).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if existing > 0 {
+			return ErrConfigNamespaceConflict
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return created, nil
+}
+
+func UpdateConfigNamespace(ctx context.Context, id uint, input ConfigNamespaceInput) (*ConfigNamespace, error) {
+	input = normalizeConfigNamespaceInput(input)
+	if id == 0 {
+		return nil, ErrConfigNamespaceNotFound
+	}
+	if err := validateConfigNamespaceInput(input); err != nil {
+		return nil, err
+	}
+	updated := &ConfigNamespace{}
+	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var namespace ConfigNamespace
+		if err := tx.Clauses(clause.Locking{Strength: configLockUpdate}).First(&namespace, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConfigNamespaceNotFound
+			}
+			return errors.Join(ErrConfigStorage, err)
+		}
+		var existing int64
+		if err := tx.Model(&ConfigNamespace{}).Where("slug = ? AND id <> ?", input.Slug, id).Count(&existing).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if existing > 0 {
+			return ErrConfigNamespaceConflict
+		}
+		changes := map[string]any{"name": input.Name, "slug": input.Slug, "description": input.Description}
+		if err := tx.Model(&namespace).Updates(changes).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		if err := tx.First(updated, id).Error; err != nil {
+			return errors.Join(ErrConfigStorage, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Join(ErrConfigStorage, err)
+	}
+	return updated, nil
+}
+
+func DeleteConfigNamespace(ctx context.Context, id uint) error {
+	if id == 0 {
+		return ErrConfigNamespaceNotFound
+	}
+	result := DB().WithContext(ctx).Delete(&ConfigNamespace{}, id)
+	if result.Error != nil {
+		return errors.Join(ErrConfigStorage, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrConfigNamespaceNotFound
+	}
+	return nil
+}
+
+func ListConfigEnvironments(ctx context.Context, namespaceID uint) ([]ConfigEnvironment, error) {
+	return listConfigEnvironments(ctx, DB(), namespaceID)
+}
+
+func listConfigEnvironments(ctx context.Context, conn *gorm.DB, namespaceID uint) ([]ConfigEnvironment, error) {
+	if err := requireConfigNamespace(ctx, conn, namespaceID); err != nil {
+		return nil, err
+	}
 	environments := make([]ConfigEnvironment, 0)
-	if err := conn.WithContext(ctx).Order("name ASC, id ASC").Find(&environments).Error; err != nil {
+	if err := conn.WithContext(ctx).Where("namespace_id = ?", namespaceID).Order("name ASC, id ASC").Find(&environments).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 
@@ -124,6 +266,7 @@ func listConfigEnvironments(ctx context.Context, conn *gorm.DB) ([]ConfigEnviron
 		Group("environment_id")
 	latestReleases := make([]ConfigRelease, 0)
 	if err := conn.WithContext(ctx).
+		Where("environment_id IN (?)", conn.Model(&ConfigEnvironment{}).Select("id").Where("namespace_id = ?", namespaceID)).
 		Where("(environment_id, version) IN (?)", latestVersions).
 		Find(&latestReleases).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
@@ -162,8 +305,11 @@ func applyConfigEnvironmentReleaseState(environments []ConfigEnvironment, releas
 	return nil
 }
 
-func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
+func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
 	input = normalizeConfigEnvironmentInput(input)
+	if namespaceID == 0 {
+		return nil, ErrConfigNamespaceNotFound
+	}
 	if err := validateConfigEnvironmentInput(input); err != nil {
 		return nil, err
 	}
@@ -171,13 +317,16 @@ func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) 
 	var created *ConfigEnvironment
 	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var count int64
-		if err := tx.Model(&ConfigEnvironment{}).Count(&count).Error; err != nil {
+		if err := requireConfigNamespace(ctx, tx, namespaceID); err != nil {
+			return err
+		}
+		if err := tx.Model(&ConfigEnvironment{}).Where("namespace_id = ?", namespaceID).Count(&count).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
 		if count >= maxConfigEnvironments {
 			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment limit reached"))
 		}
-		environments, err := lockedConfigEnvironments(ctx, tx)
+		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
 			return err
 		}
@@ -194,6 +343,7 @@ func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) 
 			ParentID:          input.ParentID,
 			DraftConfig:       "{}",
 			DraftDescriptions: "{}",
+			NamespaceID:       namespaceID,
 		}
 		if err := tx.Create(created).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
@@ -206,7 +356,7 @@ func CreateConfigEnvironment(ctx context.Context, input ConfigEnvironmentInput) 
 	return created, nil
 }
 
-func UpdateConfigEnvironment(ctx context.Context, id uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
+func UpdateConfigEnvironment(ctx context.Context, namespaceID, id uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
 	input = normalizeConfigEnvironmentInput(input)
 	if id == 0 {
 		return nil, ErrConfigEnvironmentNotFound
@@ -217,7 +367,7 @@ func UpdateConfigEnvironment(ctx context.Context, id uint, input ConfigEnvironme
 
 	updated := &ConfigEnvironment{}
 	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		environments, err := lockedConfigEnvironments(ctx, tx)
+		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
 			return err
 		}
@@ -237,10 +387,10 @@ func UpdateConfigEnvironment(ctx context.Context, id uint, input ConfigEnvironme
 			"description": input.Description,
 			"parent_id":   input.ParentID,
 		}
-		if err := tx.Model(&ConfigEnvironment{}).Where("id = ?", id).Updates(changes).Error; err != nil {
+		if err := tx.Model(&ConfigEnvironment{}).Where("namespace_id = ? AND id = ?", namespaceID, id).Updates(changes).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
-		if err := tx.First(updated, id).Error; err != nil {
+		if err := tx.Where("namespace_id = ?", namespaceID).First(updated, id).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
 		return nil
@@ -251,12 +401,12 @@ func UpdateConfigEnvironment(ctx context.Context, id uint, input ConfigEnvironme
 	return updated, nil
 }
 
-func DeleteConfigEnvironment(ctx context.Context, id uint) error {
+func DeleteConfigEnvironment(ctx context.Context, namespaceID, id uint) error {
 	if id == 0 {
 		return ErrConfigEnvironmentNotFound
 	}
 	err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		environments, err := lockedConfigEnvironments(ctx, tx)
+		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
 			return err
 		}
@@ -271,7 +421,7 @@ func DeleteConfigEnvironment(ctx context.Context, id uint) error {
 		if err := tx.Where("environment_id = ?", id).Delete(&ConfigRelease{}).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
-		if err := tx.Delete(&ConfigEnvironment{}, id).Error; err != nil {
+		if err := tx.Where("namespace_id = ?", namespaceID).Delete(&ConfigEnvironment{}, id).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
 		return nil
@@ -282,10 +432,10 @@ func DeleteConfigEnvironment(ctx context.Context, id uint) error {
 	return nil
 }
 
-func SaveConfigDraft(ctx context.Context, environmentID uint, raw, rawDescriptions []byte) (*ResolvedConfig, error) {
+func SaveConfigDraft(ctx context.Context, namespaceID, environmentID uint, raw, rawDescriptions []byte) (*ResolvedConfig, error) {
 	config, err := DecodeConfig(raw)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
@@ -305,7 +455,9 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw, rawDescriptio
 	result := &ResolvedConfig{}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var environment ConfigEnvironment
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&environment, environmentID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: configLockUpdate}).
+			Where("namespace_id = ?", namespaceID).
+			First(&environment, environmentID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.Join(ErrConfigEnvironmentNotFound, err)
 			}
@@ -318,7 +470,7 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw, rawDescriptio
 		if err := tx.Model(&environment).Updates(changes).Error; err != nil {
 			return errors.Join(ErrConfigStorage, err)
 		}
-		resolved, err := resolveConfig(ctx, tx, environmentID)
+		resolved, err := resolveConfig(ctx, tx, namespaceID, environmentID)
 		if err != nil {
 			return err
 		}
@@ -331,8 +483,8 @@ func SaveConfigDraft(ctx context.Context, environmentID uint, raw, rawDescriptio
 	return result, nil
 }
 
-func GetConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, map[string]any, ConfigDescriptions, error) {
-	resolved, err := resolveConfig(ctx, DB(), environmentID)
+func GetConfigDraft(ctx context.Context, namespaceID, environmentID uint) (*ResolvedConfig, map[string]any, ConfigDescriptions, error) {
+	resolved, err := resolveConfig(ctx, DB(), namespaceID, environmentID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -347,13 +499,13 @@ func GetConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, m
 	return resolved, draft, descriptions, nil
 }
 
-func ResolveConfigDraft(ctx context.Context, environmentID uint) (*ResolvedConfig, error) {
-	return resolveConfig(ctx, DB(), environmentID)
+func ResolveConfigDraft(ctx context.Context, namespaceID, environmentID uint) (*ResolvedConfig, error) {
+	return resolveConfig(ctx, DB(), namespaceID, environmentID)
 }
 
-func resolveConfig(ctx context.Context, conn *gorm.DB, environmentID uint) (*ResolvedConfig, error) {
+func resolveConfig(ctx context.Context, conn *gorm.DB, namespaceID, environmentID uint) (*ResolvedConfig, error) {
 	environments := make([]ConfigEnvironment, 0)
-	if err := conn.WithContext(ctx).Order("id ASC").Find(&environments).Error; err != nil {
+	if err := conn.WithContext(ctx).Where("namespace_id = ?", namespaceID).Order("id ASC").Find(&environments).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	return resolveConfigFromEnvironments(environments, environmentID)
@@ -421,7 +573,7 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 	}, nil
 }
 
-func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishResult, error) {
+func PublishConfigs(ctx context.Context, namespaceID uint, environmentIDs []uint) (*ConfigPublishResult, error) {
 	ids := uniqueSortedIDs(environmentIDs)
 	if len(ids) == 0 || len(ids) > maxConfigEnvironments {
 		return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("select between 1 and 100 environments"))
@@ -432,7 +584,7 @@ func PublishConfigs(ctx context.Context, environmentIDs []uint) (*ConfigPublishR
 	}
 	result := &ConfigPublishResult{BatchID: batchID, Releases: make([]PublishedConfig, 0, len(ids))}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		environments, err := lockedConfigEnvironments(ctx, tx)
+		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
 			return err
 		}
@@ -496,7 +648,10 @@ func encodeResolvedConfig(resolved *ResolvedConfig) (string, string, error) {
 	return string(encoded), string(encodedDescriptions), nil
 }
 
-func LatestPublishedConfig(ctx context.Context, environmentID uint) (*PublishedConfig, error) {
+func LatestPublishedConfig(ctx context.Context, namespaceID, environmentID uint) (*PublishedConfig, error) {
+	if err := requireConfigEnvironment(ctx, DB(), namespaceID, environmentID); err != nil {
+		return nil, err
+	}
 	var release ConfigRelease
 	err := DB().WithContext(ctx).
 		Where("environment_id = ?", environmentID).
@@ -511,9 +666,12 @@ func LatestPublishedConfig(ctx context.Context, environmentID uint) (*PublishedC
 	return publishedConfigFromRelease(release)
 }
 
-func PublishedConfigVersion(ctx context.Context, environmentID uint, version uint64) (*PublishedConfig, error) {
+func PublishedConfigVersion(ctx context.Context, namespaceID, environmentID uint, version uint64) (*PublishedConfig, error) {
 	if environmentID == 0 || version == 0 {
 		return nil, ErrConfigReleaseNotFound
+	}
+	if err := requireConfigEnvironment(ctx, DB(), namespaceID, environmentID); err != nil {
+		return nil, err
 	}
 	var release ConfigRelease
 	err := DB().WithContext(ctx).
@@ -528,12 +686,12 @@ func PublishedConfigVersion(ctx context.Context, environmentID uint, version uin
 	return publishedConfigFromRelease(release)
 }
 
-func ListConfigReleases(ctx context.Context, environmentID uint) ([]ConfigReleaseSummary, error) {
+func ListConfigReleases(ctx context.Context, namespaceID, environmentID uint) ([]ConfigReleaseSummary, error) {
 	if environmentID == 0 {
 		return nil, ErrConfigEnvironmentNotFound
 	}
 	var count int64
-	if err := DB().WithContext(ctx).Model(&ConfigEnvironment{}).Where("id = ?", environmentID).Count(&count).Error; err != nil {
+	if err := DB().WithContext(ctx).Model(&ConfigEnvironment{}).Where("namespace_id = ? AND id = ?", namespaceID, environmentID).Count(&count).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	if count == 0 {
@@ -551,11 +709,15 @@ func ListConfigReleases(ctx context.Context, environmentID uint) ([]ConfigReleas
 	return releases, nil
 }
 
-func ListAllConfigReleases(ctx context.Context) ([]ConfigReleaseSummary, error) {
+func ListAllConfigReleases(ctx context.Context, namespaceID uint) ([]ConfigReleaseSummary, error) {
+	if err := requireConfigNamespace(ctx, DB(), namespaceID); err != nil {
+		return nil, err
+	}
 	releases := make([]ConfigReleaseSummary, 0)
 	if err := DB().WithContext(ctx).
 		Model(&ConfigRelease{}).
 		Select("environment_id, batch_id, version, created_at AS published_at").
+		Where("environment_id IN (?)", DB().Model(&ConfigEnvironment{}).Select("id").Where("namespace_id = ?", namespaceID)).
 		Order("environment_id ASC, version DESC").
 		Scan(&releases).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
@@ -865,11 +1027,31 @@ func normalizeConfigEnvironmentInput(input ConfigEnvironmentInput) ConfigEnviron
 	return input
 }
 
+func normalizeConfigNamespaceInput(input ConfigNamespaceInput) ConfigNamespaceInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Slug = strings.ToLower(strings.TrimSpace(input.Slug))
+	input.Description = strings.TrimSpace(input.Description)
+	return input
+}
+
+func validateConfigNamespaceInput(input ConfigNamespaceInput) error {
+	if input.Name == "" || len(input.Name) > 100 {
+		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace name must contain 1 to 100 characters"))
+	}
+	if !configSlugPattern.MatchString(input.Slug) {
+		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores"))
+	}
+	if len(input.Description) > 500 {
+		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace description is too long"))
+	}
+	return nil
+}
+
 func validateConfigEnvironmentInput(input ConfigEnvironmentInput) error {
 	if input.Name == "" || len(input.Name) > 100 {
 		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment name must contain 1 to 100 characters"))
 	}
-	if !environmentSlugPattern.MatchString(input.Slug) {
+	if !configSlugPattern.MatchString(input.Slug) {
 		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores"))
 	}
 	if len(input.Description) > 500 {
@@ -878,15 +1060,50 @@ func validateConfigEnvironmentInput(input ConfigEnvironmentInput) error {
 	return nil
 }
 
-func lockedConfigEnvironments(ctx context.Context, tx *gorm.DB) ([]ConfigEnvironment, error) {
+func lockedConfigEnvironments(ctx context.Context, tx *gorm.DB, namespaceID uint) ([]ConfigEnvironment, error) {
+	if err := requireConfigNamespace(ctx, tx, namespaceID); err != nil {
+		return nil, err
+	}
 	environments := make([]ConfigEnvironment, 0)
 	if err := tx.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Clauses(clause.Locking{Strength: configLockUpdate}).
+		Where("namespace_id = ?", namespaceID).
 		Order("id ASC").
 		Find(&environments).Error; err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	return environments, nil
+}
+
+func requireConfigNamespace(ctx context.Context, conn *gorm.DB, namespaceID uint) error {
+	if namespaceID == 0 {
+		return ErrConfigNamespaceNotFound
+	}
+	var count int64
+	if err := conn.WithContext(ctx).Model(&ConfigNamespace{}).Where("id = ?", namespaceID).Count(&count).Error; err != nil {
+		return errors.Join(ErrConfigStorage, err)
+	}
+	if count == 0 {
+		return ErrConfigNamespaceNotFound
+	}
+	return nil
+}
+
+func requireConfigEnvironment(ctx context.Context, conn *gorm.DB, namespaceID, environmentID uint) error {
+	if namespaceID == 0 || environmentID == 0 {
+		return ErrConfigEnvironmentNotFound
+	}
+	var count int64
+	if err := conn.WithContext(ctx).
+		Model(&ConfigEnvironment{}).
+		Where("namespace_id = ? AND id = ?", namespaceID, environmentID).
+		Count(&count).Error; err != nil {
+		return errors.Join(ErrConfigStorage, err)
+	}
+	if count == 0 {
+		return ErrConfigEnvironmentNotFound
+	}
+	return nil
 }
 
 func validateEnvironmentParent(environments []ConfigEnvironment, environmentID, parentID uint) error {

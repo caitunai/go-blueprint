@@ -1,3 +1,44 @@
+table "gb_config_namespaces" {
+  schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
+  column "id" {
+    null           = false
+    type           = bigint
+    auto_increment = true
+  }
+  column "name" {
+    null = false
+    type = varchar(100)
+  }
+  column "slug" {
+    null = false
+    type = varchar(64)
+  }
+  column "description" {
+    null    = false
+    type    = varchar(500)
+    default = ""
+  }
+  column "created_at" {
+    null    = false
+    type    = timestamp
+    default = sql("CURRENT_TIMESTAMP")
+  }
+  column "updated_at" {
+    null    = false
+    type    = timestamp
+    default = sql("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  index "idx_gb_config_namespaces_slug" {
+    unique  = true
+    columns = [column.slug]
+  }
+}
+
 table "gb_config_environments" {
   schema = schema.default
   charset = "utf8mb4"
@@ -10,6 +51,10 @@ table "gb_config_environments" {
   column "name" {
     null = false
     type = varchar(100)
+  }
+  column "namespace_id" {
+    null = false
+    type = bigint
   }
   column "slug" {
     null = false
@@ -46,12 +91,18 @@ table "gb_config_environments" {
   primary_key {
     columns = [column.id]
   }
-  index "idx_gb_config_environments_slug" {
+  index "idx_config_environment_namespace_slug" {
     unique  = true
-    columns = [column.slug]
+    columns = [column.namespace_id, column.slug]
   }
   index "idx_gb_config_environments_parent_id" {
     columns = [column.parent_id]
+  }
+  foreign_key "fk_gb_config_environments_namespace" {
+    columns     = [column.namespace_id]
+    ref_columns = [table.gb_config_namespaces.column.id]
+    on_update   = NO_ACTION
+    on_delete   = CASCADE
   }
 }
 

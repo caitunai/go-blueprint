@@ -127,7 +127,20 @@ The current browser UI is a Vite-based multi-entry application under `/storage/u
 atlas migrate diff <migration_name> --env local
 ```
 
-5. Apply migrations:
+5. If the migration needs default, lookup, or other initialization data, edit the newly generated migration SQL file before applying it. Add the required `INSERT` or other data-migration statements in dependency-safe order; for example, insert a referenced default row after its table is created and before existing rows are backfilled or a foreign key is enforced. Do not expect `atlas migrate diff` to infer ordinary seed data from table definitions.
+6. After any manual edit to a generated migration file, recalculate the migration directory checksum:
+
+```bash
+atlas migrate hash --env local
+```
+
+7. Validate the complete migration directory before applying it:
+
+```bash
+atlas migrate validate --env local
+```
+
+8. Apply migrations only after the generated SQL, manually added data SQL, checksum, and validation have all been reviewed:
 
 ```bash
 atlas migrate apply --env local

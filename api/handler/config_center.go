@@ -17,11 +17,19 @@ import (
 const configCenterEntry = "src/config-center/main.js"
 
 const (
+	keyConfigNamespace   = "namespace"
 	keyConfigEnvironment = "environment"
 	keyInheritanceChain  = "inheritance_chain"
+	keyConfigReason      = "reason"
 )
 
 var errConfigInheritance = errors.New("resolve inherited configuration failed")
+
+type configNamespaceForm struct {
+	Name        string `json:"name" binding:"required"`
+	Slug        string `json:"slug" binding:"required"`
+	Description string `json:"description"`
+}
 
 type configEnvironmentForm struct {
 	Name        string `json:"name" binding:"required"`
@@ -56,22 +64,86 @@ func ConfigCenterPage(c *base.Context) {
 }
 
 func ConfigCenterControl(r *base.Router) {
-	r.GET("/environments", listConfigEnvironments)
-	r.POST("/environments", createConfigEnvironment)
-	r.PUT("/environments/:id", updateConfigEnvironment)
-	r.DELETE("/environments/:id", deleteConfigEnvironment)
-	r.GET("/environments/:id/config", getConfigDraft)
-	r.PUT("/environments/:id/config", saveConfigDraft)
-	r.GET("/environments/:id/final", getFinalConfig)
-	r.GET("/environments/:id/published", getPublishedConfig)
-	r.GET("/environments/:id/releases", listConfigReleases)
-	r.GET("/environments/:id/releases/:version", getConfigRelease)
-	r.GET("/releases", listAllConfigReleases)
-	r.POST("/publish", publishConfigs)
+	r.GET("/namespaces", listConfigNamespaces)
+	r.POST("/namespaces", createConfigNamespace)
+	r.PUT("/namespaces/:namespace_id", updateConfigNamespace)
+	r.DELETE("/namespaces/:namespace_id", deleteConfigNamespace)
+	r.GET("/namespaces/:namespace_id/environments", listConfigEnvironments)
+	r.POST("/namespaces/:namespace_id/environments", createConfigEnvironment)
+	r.PUT("/namespaces/:namespace_id/environments/:id", updateConfigEnvironment)
+	r.DELETE("/namespaces/:namespace_id/environments/:id", deleteConfigEnvironment)
+	r.GET("/namespaces/:namespace_id/environments/:id/config", getConfigDraft)
+	r.PUT("/namespaces/:namespace_id/environments/:id/config", saveConfigDraft)
+	r.GET("/namespaces/:namespace_id/environments/:id/final", getFinalConfig)
+	r.GET("/namespaces/:namespace_id/environments/:id/published", getPublishedConfig)
+	r.GET("/namespaces/:namespace_id/environments/:id/releases", listConfigReleases)
+	r.GET("/namespaces/:namespace_id/environments/:id/releases/:version", getConfigRelease)
+	r.GET("/namespaces/:namespace_id/releases", listAllConfigReleases)
+	r.POST("/namespaces/:namespace_id/publish", publishConfigs)
+}
+
+func listConfigNamespaces(c *base.Context) {
+	namespaces, err := db.ListConfigNamespaces(c.Request.Context())
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	c.Success(gin.H{"namespaces": namespaces})
+}
+
+func createConfigNamespace(c *base.Context) {
+	form := &configNamespaceForm{}
+	if err := c.ShouldBindJSON(form); err != nil {
+		c.ErrorForm("命名空间信息格式不正确", gin.H{KeyError: err.Error()})
+		return
+	}
+	namespace, err := db.CreateConfigNamespace(c.Request.Context(), configNamespaceInput(form))
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	log.Ctx(c.Request.Context()).Info().Uint("namespace_id", namespace.ID).Msg("config namespace created")
+	c.Success(gin.H{keyConfigNamespace: namespace})
+}
+
+func updateConfigNamespace(c *base.Context) {
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
+	form := &configNamespaceForm{}
+	if err := c.ShouldBindJSON(form); err != nil {
+		c.ErrorForm("命名空间信息格式不正确", gin.H{KeyError: err.Error()})
+		return
+	}
+	namespace, err := db.UpdateConfigNamespace(c.Request.Context(), namespaceID, configNamespaceInput(form))
+	if err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	log.Ctx(c.Request.Context()).Info().Uint("namespace_id", namespaceID).Msg("config namespace updated")
+	c.Success(gin.H{keyConfigNamespace: namespace})
+}
+
+func deleteConfigNamespace(c *base.Context) {
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
+	if err := db.DeleteConfigNamespace(c.Request.Context(), namespaceID); err != nil {
+		respondConfigError(c, err)
+		return
+	}
+	log.Ctx(c.Request.Context()).Info().Uint("namespace_id", namespaceID).Msg("config namespace deleted")
+	c.Success(gin.H{"id": namespaceID})
 }
 
 func listConfigEnvironments(c *base.Context) {
-	environments, err := db.ListConfigEnvironments(c.Request.Context())
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
+	environments, err := db.ListConfigEnvironments(c.Request.Context(), namespaceID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -80,12 +152,16 @@ func listConfigEnvironments(c *base.Context) {
 }
 
 func createConfigEnvironment(c *base.Context) {
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
 	form := &configEnvironmentForm{}
 	if err := c.ShouldBindJSON(form); err != nil {
 		c.ErrorForm("环境信息格式不正确", gin.H{KeyError: err.Error()})
 		return
 	}
-	environment, err := db.CreateConfigEnvironment(c.Request.Context(), configEnvironmentInput(form))
+	environment, err := db.CreateConfigEnvironment(c.Request.Context(), namespaceID, configEnvironmentInput(form))
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -95,7 +171,7 @@ func createConfigEnvironment(c *base.Context) {
 }
 
 func updateConfigEnvironment(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
@@ -104,7 +180,7 @@ func updateConfigEnvironment(c *base.Context) {
 		c.ErrorForm("环境信息格式不正确", gin.H{KeyError: err.Error()})
 		return
 	}
-	environment, err := db.UpdateConfigEnvironment(c.Request.Context(), id, configEnvironmentInput(form))
+	environment, err := db.UpdateConfigEnvironment(c.Request.Context(), namespaceID, id, configEnvironmentInput(form))
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -114,11 +190,11 @@ func updateConfigEnvironment(c *base.Context) {
 }
 
 func deleteConfigEnvironment(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
-	if err := db.DeleteConfigEnvironment(c.Request.Context(), id); err != nil {
+	if err := db.DeleteConfigEnvironment(c.Request.Context(), namespaceID, id); err != nil {
 		respondConfigError(c, err)
 		return
 	}
@@ -127,16 +203,16 @@ func deleteConfigEnvironment(c *base.Context) {
 }
 
 func getConfigDraft(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
-	resolved, draft, descriptions, err := db.GetConfigDraft(c.Request.Context(), id)
+	resolved, draft, descriptions, err := db.GetConfigDraft(c.Request.Context(), namespaceID, id)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
-	inherited, inheritedDescriptions, err := inheritedConfig(c, resolved.Environment.ParentID)
+	inherited, inheritedDescriptions, err := inheritedConfig(c, namespaceID, resolved.Environment.ParentID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -154,7 +230,7 @@ func getConfigDraft(c *base.Context) {
 }
 
 func saveConfigDraft(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
@@ -172,13 +248,13 @@ func saveConfigDraft(c *base.Context) {
 	if len(descriptions) == 0 {
 		descriptions = json.RawMessage("{}")
 	}
-	resolved, err := db.SaveConfigDraft(c.Request.Context(), id, form.Config, descriptions)
+	resolved, err := db.SaveConfigDraft(c.Request.Context(), namespaceID, id, form.Config, descriptions)
 	if err != nil {
 		respondConfigError(c, err)
 		return
 	}
 	log.Ctx(c.Request.Context()).Info().Uint("environment_id", id).Msg("config draft saved")
-	inherited, inheritedDescriptions, err := inheritedConfig(c, resolved.Environment.ParentID)
+	inherited, inheritedDescriptions, err := inheritedConfig(c, namespaceID, resolved.Environment.ParentID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -194,11 +270,11 @@ func saveConfigDraft(c *base.Context) {
 }
 
 func getFinalConfig(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
-	resolved, err := db.ResolveConfigDraft(c.Request.Context(), id)
+	resolved, err := db.ResolveConfigDraft(c.Request.Context(), namespaceID, id)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -212,11 +288,11 @@ func getFinalConfig(c *base.Context) {
 }
 
 func getPublishedConfig(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
-	published, err := db.LatestPublishedConfig(c.Request.Context(), id)
+	published, err := db.LatestPublishedConfig(c.Request.Context(), namespaceID, id)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -225,11 +301,11 @@ func getPublishedConfig(c *base.Context) {
 }
 
 func listConfigReleases(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
-	releases, err := db.ListConfigReleases(c.Request.Context(), id)
+	releases, err := db.ListConfigReleases(c.Request.Context(), namespaceID, id)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -238,7 +314,11 @@ func listConfigReleases(c *base.Context) {
 }
 
 func listAllConfigReleases(c *base.Context) {
-	releases, err := db.ListAllConfigReleases(c.Request.Context())
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
+	releases, err := db.ListAllConfigReleases(c.Request.Context(), namespaceID)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -247,7 +327,7 @@ func listAllConfigReleases(c *base.Context) {
 }
 
 func getConfigRelease(c *base.Context) {
-	id, ok := configEnvironmentID(c)
+	namespaceID, id, ok := configResourceIDs(c)
 	if !ok {
 		return
 	}
@@ -256,7 +336,7 @@ func getConfigRelease(c *base.Context) {
 		c.ErrorForm("发布版本不正确", gin.H{})
 		return
 	}
-	published, err := db.PublishedConfigVersion(c.Request.Context(), id, version)
+	published, err := db.PublishedConfigVersion(c.Request.Context(), namespaceID, id, version)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -265,12 +345,16 @@ func getConfigRelease(c *base.Context) {
 }
 
 func publishConfigs(c *base.Context) {
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return
+	}
 	form := &configPublishForm{}
 	if err := c.ShouldBindJSON(form); err != nil {
 		c.ErrorForm("请选择需要发布的环境", gin.H{KeyError: err.Error()})
 		return
 	}
-	result, err := db.PublishConfigs(c.Request.Context(), form.EnvironmentIDs)
+	result, err := db.PublishConfigs(c.Request.Context(), namespaceID, form.EnvironmentIDs)
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -291,6 +375,35 @@ func configEnvironmentID(c *base.Context) (uint, bool) {
 	return uint(parsed), true
 }
 
+func configNamespaceID(c *base.Context) (uint, bool) {
+	parsed, err := strconv.ParseUint(c.Param("namespace_id"), 10, strconv.IntSize)
+	if err != nil || parsed == 0 {
+		c.ErrorForm("命名空间 ID 不正确", gin.H{})
+		return 0, false
+	}
+	return uint(parsed), true
+}
+
+func configResourceIDs(c *base.Context) (uint, uint, bool) {
+	namespaceID, ok := configNamespaceID(c)
+	if !ok {
+		return 0, 0, false
+	}
+	environmentID, ok := configEnvironmentID(c)
+	if !ok {
+		return 0, 0, false
+	}
+	return namespaceID, environmentID, true
+}
+
+func configNamespaceInput(form *configNamespaceForm) db.ConfigNamespaceInput {
+	return db.ConfigNamespaceInput{
+		Name:        form.Name,
+		Slug:        form.Slug,
+		Description: form.Description,
+	}
+}
+
 func configEnvironmentInput(form *configEnvironmentForm) db.ConfigEnvironmentInput {
 	return db.ConfigEnvironmentInput{
 		Name:        form.Name,
@@ -300,11 +413,11 @@ func configEnvironmentInput(form *configEnvironmentForm) db.ConfigEnvironmentInp
 	}
 }
 
-func inheritedConfig(c *base.Context, parentID uint) (map[string]any, db.ConfigDescriptions, error) {
+func inheritedConfig(c *base.Context, namespaceID, parentID uint) (map[string]any, db.ConfigDescriptions, error) {
 	if parentID == 0 {
 		return make(map[string]any), make(db.ConfigDescriptions), nil
 	}
-	resolved, err := db.ResolveConfigDraft(c.Request.Context(), parentID)
+	resolved, err := db.ResolveConfigDraft(c.Request.Context(), namespaceID, parentID)
 	if err != nil {
 		return nil, nil, errors.Join(errConfigInheritance, err)
 	}
@@ -313,6 +426,12 @@ func inheritedConfig(c *base.Context, parentID uint) (map[string]any, db.ConfigD
 
 func respondConfigError(c *base.Context, err error) {
 	switch {
+	case errors.Is(err, db.ErrConfigNamespaceNotFound):
+		c.NotFound("命名空间不存在", gin.H{})
+	case errors.Is(err, db.ErrConfigNamespaceConflict):
+		c.Conflict("命名空间标识已存在", gin.H{})
+	case errors.Is(err, db.ErrConfigNamespaceInvalid):
+		c.ErrorForm("命名空间信息不合法", gin.H{keyConfigReason: err.Error()})
 	case errors.Is(err, db.ErrConfigEnvironmentNotFound):
 		c.NotFound("配置环境不存在", gin.H{})
 	case errors.Is(err, db.ErrConfigReleaseNotFound):
@@ -322,9 +441,9 @@ func respondConfigError(c *base.Context, err error) {
 	case errors.Is(err, db.ErrConfigEnvironmentInUse):
 		c.Conflict("请先调整子环境的继承关系", gin.H{})
 	case errors.Is(err, db.ErrConfigInvalid):
-		c.ErrorForm("配置内容不合法，请检查字段类型和结构", gin.H{"reason": err.Error()})
+		c.ErrorForm("配置内容不合法，请检查字段类型和结构", gin.H{keyConfigReason: err.Error()})
 	case errors.Is(err, db.ErrConfigEnvironmentInvalid):
-		c.ErrorForm("环境信息或继承关系不合法", gin.H{"reason": err.Error()})
+		c.ErrorForm("环境信息或继承关系不合法", gin.H{keyConfigReason: err.Error()})
 	default:
 		log.Ctx(c.Request.Context()).Error().Err(err).Msg("config center request failed")
 		c.ErrorMessage("配置系统暂时不可用")

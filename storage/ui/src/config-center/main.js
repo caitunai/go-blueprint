@@ -496,6 +496,7 @@ function configCenterApp() {
   const toastTimers = new Set();
 
   return {
+    namespaces: [], selectedNamespaceID: 0, loadingNamespaces: true, namespaceMenu: false,
     environments: [], selectedID: 0, publishIDs: [], inheritanceChain: [],
     draft: {}, draftDescriptions: {}, inherited: {}, inheritedDescriptions: {},
     finalConfig: {}, finalDescriptions: {}, publishedRelease: null,
@@ -506,12 +507,14 @@ function configCenterApp() {
     configFormats: CONFIG_FORMATS,
     releases: [], comparisonLoading: false, comparisonError: "", comparisonMenu: "",
     comparisonLeft: "", comparisonRight: "", comparisonLeftData: null, comparisonRightData: null,
+    namespaceModal: false, namespaceSaving: false,
     environmentModal: false, environmentSaving: false, parentSelectorOpen: false,
     sidebarHidden: false, confirming: false,
     toasts: [], toastSequence: 0,
+    namespaceForm: { id: 0, name: "", slug: "", description: "" },
     environmentForm: { id: 0, name: "", slug: "", description: "", parent_id: 0 },
     confirmation: {
-      open: false, kind: "", title: "", message: "", confirmLabel: "确认", tone: "primary", targetID: 0, targets: [], urlMode: "push",
+      open: false, kind: "", title: "", message: "", confirmLabel: "确认", tone: "primary", targetID: 0, targetNamespaceID: 0, targets: [], urlMode: "push",
     },
 
     async init() {
@@ -528,13 +531,15 @@ function configCenterApp() {
         if (tab === "draft") this.$nextTick(() => this.renderEditor());
         if (tab === "compare") this.$nextTick(() => this.renderComparisonDiff());
       });
-      await this.loadEnvironments();
-      if (this.environments.length > 0) {
-        const requestedID = this.environmentIDFromURL();
-        const initialID = this.environments.some((environment) => environment.id === requestedID)
-          ? requestedID
-          : this.environments[0].id;
-        await this.selectEnvironment(initialID, true, "replace");
+      await this.loadNamespaces();
+      if (this.namespaces.length > 0) {
+        const requestedNamespaceID = this.namespaceIDFromURL();
+        const initialNamespaceID = this.namespaces.some((namespace) => namespace.id === requestedNamespaceID)
+          ? requestedNamespaceID
+          : this.namespaces[0].id;
+        await this.selectNamespace(initialNamespaceID, true, "replace", this.environmentIDFromURL());
+      } else {
+        this.loadingEnvironments = false;
       }
     },
     destroy() {
@@ -552,9 +557,18 @@ function configCenterApp() {
       event.returnValue = "";
     },
     async handlePopState() {
+      const requestedNamespaceID = this.namespaceIDFromURL();
       const requestedID = this.environmentIDFromURL();
+      if (requestedNamespaceID !== this.selectedNamespaceID) {
+        if (!this.namespaces.some((namespace) => namespace.id === requestedNamespaceID)) {
+          this.syncWorkspaceURL(this.selectedNamespaceID, this.selectedID, "replace");
+          return;
+        }
+        await this.selectNamespace(requestedNamespaceID, false, "none", requestedID);
+        return;
+      }
       if (!this.environments.some((environment) => environment.id === requestedID)) {
-        if (this.selectedID) this.syncEnvironmentURL(this.selectedID, "replace");
+        this.syncWorkspaceURL(this.selectedNamespaceID, this.selectedID, "replace");
         return;
       }
       await this.selectEnvironment(requestedID, false, "none");
@@ -569,6 +583,7 @@ function configCenterApp() {
       this.$nextTick(() => this.renderEditor());
     },
 
+    get selectedNamespace() { return this.namespaces.find((item) => item.id === this.selectedNamespaceID) ?? null; },
     get selectedEnvironment() { return this.environments.find((item) => item.id === this.selectedID) ?? null; },
     get availableParents() { return this.environments.filter((item) => item.id !== this.environmentForm.id && !this.isDescendant(item.id, this.environmentForm.id)); },
     get availableParentRows() { return buildParentEnvironmentTree(this.availableParents); },
@@ -577,7 +592,6 @@ function configCenterApp() {
       const environment = this.environments.find((item) => item.id === this.environmentForm.parent_id);
       return environment ? `${environment.name}（${environment.slug}）` : "请选择父环境";
     },
-    get publishSelectionLabel() { return this.publishIDs.length ? `已选择 ${this.publishIDs.length} 个环境` : "选择环境后可批量发布"; },
     get mergedDraftState() {
       return mergeConfigState(this.inherited, this.inheritedDescriptions, this.draft, this.draftDescriptions);
     },
@@ -604,10 +618,77 @@ function configCenterApp() {
     get comparisonSourceOptions() { return this.comparisonSourceRows.flatMap((row) => row.sources); },
     get environmentTreeRows() { return buildEnvironmentDisplayTree(this.environments); },
 
+    async loadNamespaces() {
+      this.loadingNamespaces = true;
+      try {
+        const data = await api("/namespaces");
+        this.namespaces = data.namespaces;
+      } catch (error) {
+        this.notify(error.message, "error");
+      } finally {
+        this.loadingNamespaces = false;
+      }
+    },
+
+    async selectNamespace(id, force = false, urlMode = "push", preferredEnvironmentID = 0) {
+      if (id === this.selectedNamespaceID && !force) {
+        this.namespaceMenu = false;
+        return;
+      }
+      if (this.dirty && !force) {
+        this.openConfirmation({
+          kind: "discardNamespace",
+          title: "放弃未保存的修改？",
+          message: "切换命名空间会丢失当前编辑器中尚未保存的覆盖项。",
+          confirmLabel: "放弃并切换",
+          tone: "danger",
+          targetNamespaceID: id,
+          targetID: preferredEnvironmentID,
+          urlMode,
+        });
+        return;
+      }
+      this.namespaceMenu = false;
+      this.selectedNamespaceID = id;
+      this.selectedID = 0;
+      this.publishIDs = [];
+      this.inheritanceChain = [];
+      this.releases = [];
+      this.dirty = false;
+      this.resetEnvironmentViews();
+      await this.loadEnvironments();
+      const initialEnvironmentID = this.environments.some((environment) => environment.id === preferredEnvironmentID)
+        ? preferredEnvironmentID
+        : this.environments[0]?.id ?? 0;
+      if (initialEnvironmentID) {
+        await this.selectEnvironment(initialEnvironmentID, true, urlMode);
+      } else if (urlMode !== "none") {
+        this.syncWorkspaceURL(id, 0, urlMode);
+      }
+    },
+
+    resetEnvironmentViews() {
+      this.tab = "draft";
+      this.publishedRelease = null;
+      this.publishedVersions = [];
+      this.publishedVersion = 0;
+      this.comparisonLeft = "";
+      this.comparisonRight = "";
+      this.comparisonLeftData = null;
+      this.comparisonRightData = null;
+      this.comparisonError = "";
+      this.comparisonMenu = "";
+    },
+
     async loadEnvironments() {
+      if (!this.selectedNamespaceID) {
+        this.environments = [];
+        this.loadingEnvironments = false;
+        return;
+      }
       this.loadingEnvironments = true;
       try {
-        const data = await api("/environments");
+        const data = await api(`/namespaces/${this.selectedNamespaceID}/environments`);
         this.environments = data.environments;
         this.publishIDs = this.publishIDs.filter((id) => this.environments.some((item) => item.id === id));
       } catch (error) {
@@ -632,18 +713,9 @@ function configCenterApp() {
         return;
       }
       this.selectedID = id;
-      this.tab = "draft";
-      this.publishedRelease = null;
-      this.publishedVersions = [];
-      this.publishedVersion = 0;
-      this.comparisonLeft = "";
-      this.comparisonRight = "";
-      this.comparisonLeftData = null;
-      this.comparisonRightData = null;
-      this.comparisonError = "";
-      this.comparisonMenu = "";
+      this.resetEnvironmentViews();
       const loaded = await this.loadDraft();
-      if (loaded && urlMode !== "none") this.syncEnvironmentURL(id, urlMode);
+      if (loaded && urlMode !== "none") this.syncWorkspaceURL(this.selectedNamespaceID, id, urlMode);
     },
 
     async loadDraft() {
@@ -651,7 +723,7 @@ function configCenterApp() {
       typeMemory.clear();
       let loaded = false;
       try {
-        const data = await api(`/environments/${this.selectedID}/config`);
+        const data = await api(`${this.namespaceAPI()}/environments/${this.selectedID}/config`);
         this.draft = cloneConfigValue(data.draft);
         this.draftDescriptions = { ...(data.draft_descriptions ?? {}) };
         this.inherited = cloneConfigValue(data.inherited);
@@ -697,7 +769,7 @@ function configCenterApp() {
       if (!this.dirty || this.saving) return;
       this.saving = true;
       try {
-        const data = await api(`/environments/${this.selectedID}/config`, {
+        const data = await api(`${this.namespaceAPI()}/environments/${this.selectedID}/config`, {
           method: "PUT",
           body: { config: this.draft, descriptions: this.draftDescriptions },
         });
@@ -716,7 +788,79 @@ function configCenterApp() {
       }
     },
 
+    openNamespaceModal(namespace = null) {
+      this.namespaceMenu = false;
+      this.namespaceForm = namespace
+        ? { id: namespace.id, name: namespace.name, slug: namespace.slug, description: namespace.description }
+        : { id: 0, name: "", slug: "", description: "" };
+      this.namespaceModal = true;
+    },
+    closeNamespaceModal() {
+      if (this.namespaceSaving) return;
+      this.namespaceModal = false;
+    },
+    async saveNamespace() {
+      this.namespaceSaving = true;
+      const id = this.namespaceForm.id;
+      try {
+        const body = {
+          name: this.namespaceForm.name,
+          slug: this.namespaceForm.slug,
+          description: this.namespaceForm.description,
+        };
+        const data = await api(id ? `/namespaces/${id}` : "/namespaces", { method: id ? "PUT" : "POST", body });
+        this.namespaceModal = false;
+        await this.loadNamespaces();
+        if (id) {
+          this.selectedNamespaceID = data.namespace.id;
+          this.syncWorkspaceURL(this.selectedNamespaceID, this.selectedID, "replace");
+        } else {
+          await this.selectNamespace(data.namespace.id);
+        }
+        this.notify(id ? "命名空间已更新" : "命名空间已创建");
+      } catch (error) {
+        this.notify(error.message, "error");
+      } finally {
+        this.namespaceSaving = false;
+      }
+    },
+    deleteSelectedNamespace() {
+      const namespace = this.selectedNamespace;
+      if (!namespace) return;
+      this.namespaceModal = false;
+      this.openConfirmation({
+        kind: "deleteNamespace",
+        title: `删除命名空间「${namespace.name}」？`,
+        message: `命名空间下的 ${namespace.environment_count} 个配置环境、所有草稿和已发布版本都将被永久删除。`,
+        confirmLabel: "确认删除命名空间",
+        tone: "danger",
+        targetNamespaceID: namespace.id,
+        targets: [{ ...namespace, slug: namespace.slug }],
+      });
+    },
+    async performDeleteNamespace(namespaceID) {
+      try {
+        await api(`/namespaces/${namespaceID}`, { method: "DELETE" });
+        this.selectedNamespaceID = 0;
+        this.selectedID = 0;
+        this.environments = [];
+        this.publishIDs = [];
+        this.dirty = false;
+        this.resetEnvironmentViews();
+        await this.loadNamespaces();
+        if (this.namespaces.length) await this.selectNamespace(this.namespaces[0].id, true, "replace");
+        else this.syncWorkspaceURL(0, 0, "replace");
+        this.notify("命名空间及其配置环境已删除");
+      } catch (error) {
+        this.notify(error.message, "error");
+      }
+    },
+
     openEnvironmentModal(environment = null) {
+      if (!this.selectedNamespaceID) {
+        this.openNamespaceModal();
+        return;
+      }
       if (environment) {
         this.environmentForm = { id: environment.id, name: environment.name, slug: environment.slug, description: environment.description, parent_id: environment.parent_id };
       } else {
@@ -740,9 +884,10 @@ function configCenterApp() {
       const id = this.environmentForm.id;
       try {
         const body = { name: this.environmentForm.name, slug: this.environmentForm.slug, description: this.environmentForm.description, parent_id: Number(this.environmentForm.parent_id) || 0 };
-        const data = await api(id ? `/environments/${id}` : "/environments", { method: id ? "PUT" : "POST", body });
+        const path = id ? `${this.namespaceAPI()}/environments/${id}` : `${this.namespaceAPI()}/environments`;
+        const data = await api(path, { method: id ? "PUT" : "POST", body });
         this.environmentModal = false;
-        await this.loadEnvironments();
+        await Promise.all([this.loadEnvironments(), this.loadNamespaces()]);
         await this.selectEnvironment(data.environment.id, true);
         this.notify(id ? "环境已更新" : "环境已创建");
       } catch (error) {
@@ -768,11 +913,11 @@ function configCenterApp() {
 
     async performDeleteEnvironment(environmentID) {
       try {
-        await api(`/environments/${environmentID}`, { method: "DELETE" });
+        await api(`${this.namespaceAPI()}/environments/${environmentID}`, { method: "DELETE" });
         this.selectedID = 0;
-        await this.loadEnvironments();
+        await Promise.all([this.loadEnvironments(), this.loadNamespaces()]);
         if (this.environments.length) await this.selectEnvironment(this.environments[0].id, true, "replace");
-        else this.syncEnvironmentURL(0, "replace");
+        else this.syncWorkspaceURL(this.selectedNamespaceID, 0, "replace");
         this.notify("环境已删除");
       } catch (error) {
         this.notify(error.message, "error");
@@ -799,7 +944,7 @@ function configCenterApp() {
     async performPublish() {
       this.publishing = true;
       try {
-        const data = await api("/publish", { method: "POST", body: { environment_ids: this.publishIDs } });
+        const data = await api(`${this.namespaceAPI()}/publish`, { method: "POST", body: { environment_ids: this.publishIDs } });
         this.releases = [];
         await this.loadEnvironments();
         if (this.tab === "published") await this.loadPublishedVersions();
@@ -811,7 +956,7 @@ function configCenterApp() {
       }
     },
 
-    openConfirmation({ kind, title, message, confirmLabel, tone, targetID = 0, targets = [], urlMode = "push" }) {
+    openConfirmation({ kind, title, message, confirmLabel, tone, targetID = 0, targetNamespaceID = 0, targets = [], urlMode = "push" }) {
       this.confirmation = {
         open: true,
         kind,
@@ -820,6 +965,7 @@ function configCenterApp() {
         confirmLabel,
         tone,
         targetID,
+        targetNamespaceID,
         urlMode,
         targets: targets.map((environment) => ({
           id: environment.id,
@@ -831,19 +977,21 @@ function configCenterApp() {
     },
     closeConfirmation() {
       if (this.confirming) return;
-      if (this.confirmation.kind === "discard" && this.confirmation.urlMode === "none" && this.selectedID) {
-        this.syncEnvironmentURL(this.selectedID, "replace");
+      if ((this.confirmation.kind === "discard" || this.confirmation.kind === "discardNamespace") && this.confirmation.urlMode === "none") {
+        this.syncWorkspaceURL(this.selectedNamespaceID, this.selectedID, "replace");
       }
       this.confirmation.open = false;
     },
     async confirmPendingAction() {
       if (this.confirming) return;
-      const { kind, targetID, urlMode } = this.confirmation;
+      const { kind, targetID, targetNamespaceID, urlMode } = this.confirmation;
       this.confirming = true;
       try {
         if (kind === "delete") await this.performDeleteEnvironment(targetID);
+        if (kind === "deleteNamespace") await this.performDeleteNamespace(targetNamespaceID);
         if (kind === "publish") await this.performPublish();
         if (kind === "discard") await this.selectEnvironment(targetID, true, urlMode);
+        if (kind === "discardNamespace") await this.selectNamespace(targetNamespaceID, true, urlMode, targetID);
         this.confirmation.open = false;
       } finally {
         this.confirming = false;
@@ -854,7 +1002,7 @@ function configCenterApp() {
     async loadPublishedVersions() {
       this.publishedLoading = true;
       try {
-        const data = await api(`/environments/${this.selectedID}/releases`);
+        const data = await api(`${this.namespaceAPI()}/environments/${this.selectedID}/releases`);
         this.publishedVersions = data.releases;
         this.publishedVersion = this.publishedVersions[0]?.version ?? 0;
         if (!this.publishedVersion) {
@@ -874,7 +1022,7 @@ function configCenterApp() {
       if (manageLoading) this.publishedLoading = true;
       this.publishedVersionMenu = false;
       try {
-        const data = await api(`/environments/${this.selectedID}/releases/${version}`);
+        const data = await api(`${this.namespaceAPI()}/environments/${this.selectedID}/releases/${version}`);
         this.publishedVersion = Number(version);
         this.publishedRelease = data.release;
       } catch (error) {
@@ -902,7 +1050,7 @@ function configCenterApp() {
       this.tab = "compare";
       if (!this.releases.length) {
         try {
-          const data = await api("/releases");
+          const data = await api(`${this.namespaceAPI()}/releases`);
           this.releases = data.releases;
         } catch (error) {
           this.notify(error.message, "error");
@@ -951,10 +1099,10 @@ function configCenterApp() {
     async loadComparisonSource(source) {
       const [kind, environmentID, version] = source.split(":");
       if (kind === "draft") {
-        const data = await api(`/environments/${environmentID}/final`);
+        const data = await api(`${this.namespaceAPI()}/environments/${environmentID}/final`);
         return { config: data.config, descriptions: data.descriptions ?? {} };
       }
-      const data = await api(`/environments/${environmentID}/releases/${version}`);
+      const data = await api(`${this.namespaceAPI()}/environments/${environmentID}/releases/${version}`);
       return { config: data.release.config, descriptions: data.release.descriptions ?? {} };
     },
     async renderComparisonDiff() {
@@ -1003,17 +1151,25 @@ function configCenterApp() {
     },
 
     environmentName(id) { return this.environments.find((item) => item.id === id)?.name ?? "未知环境"; },
+    namespaceAPI() { return `/namespaces/${this.selectedNamespaceID}`; },
+    namespaceIDFromURL() {
+      const value = new URL(window.location.href).searchParams.get("namespace");
+      const id = Number(value);
+      return Number.isSafeInteger(id) && id > 0 ? id : 0;
+    },
     environmentIDFromURL() {
       const value = new URL(window.location.href).searchParams.get("environment");
       const id = Number(value);
       return Number.isSafeInteger(id) && id > 0 ? id : 0;
     },
-    syncEnvironmentURL(id, mode = "push") {
+    syncWorkspaceURL(namespaceID, environmentID, mode = "push") {
       const url = new URL(window.location.href);
-      if (id > 0) url.searchParams.set("environment", String(id));
+      if (namespaceID > 0) url.searchParams.set("namespace", String(namespaceID));
+      else url.searchParams.delete("namespace");
+      if (environmentID > 0) url.searchParams.set("environment", String(environmentID));
       else url.searchParams.delete("environment");
       if (url.href === window.location.href) return;
-      const state = id > 0 ? { environmentID: id } : {};
+      const state = namespaceID > 0 ? { namespaceID, environmentID } : {};
       if (mode === "replace") window.history.replaceState(state, "", url);
       else window.history.pushState(state, "", url);
     },

@@ -212,11 +212,28 @@ After baseline setup, create new schema migrations. For example, to add auth-rel
 
 ```bash
 atlas migrate diff create_auth_tables --env prod
+```
+
+If the migration must insert default, lookup, or other initialization data,
+edit the newly generated SQL file in `atlas/migrations` before applying it.
+Place data statements in dependency-safe order. For example, insert a default
+row after creating its table and before backfilling existing rows or enforcing
+a foreign key that references it.
+
+After manually editing a migration file, recalculate the directory checksum,
+validate the migration directory, and then apply it:
+
+```bash
+atlas migrate hash --env prod
+atlas migrate validate --env prod
 atlas migrate apply --env prod
 ```
 
-* First command generates migration SQL reflecting changes.
-* Second command applies the migration and updates the migration history.
+* `migrate diff` generates the structural migration SQL.
+* Data SQL such as `INSERT` statements is added manually when required.
+* `migrate hash` updates `atlas/migrations/atlas.sum` after manual edits.
+* `migrate validate` checks the complete migration directory before application.
+* `migrate apply` executes the migration and updates the migration history.
 
 ---
 
@@ -225,13 +242,27 @@ atlas migrate apply --env prod
 Once the baseline is established in `prod`, you can repeat migration steps for `dev` or `local`:
 
 1. Configure environment variables in `atlas.hcl` for each environment.
-2. Generate migrations:
+2. Generate the structural migration:
 
 ```bash
 atlas migrate diff <migration_name> --env local
 ```
 
-3. Apply migrations:
+3. If initialization data is required, edit the generated SQL file and add the
+   necessary data statements before applying the migration.
+4. Recalculate the checksum after editing the migration file:
+
+```bash
+atlas migrate hash --env local
+```
+
+5. Validate the migration directory:
+
+```bash
+atlas migrate validate --env local
+```
+
+6. Apply the migration:
 
 ```bash
 atlas migrate apply --env local

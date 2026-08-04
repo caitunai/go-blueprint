@@ -257,3 +257,25 @@ func TestUniqueSortedIDs(t *testing.T) {
 		t.Fatalf("uniqueSortedIDs() = %v, want %v", got, want)
 	}
 }
+
+func TestConfigNamespaceInputNormalizationAndValidation(t *testing.T) {
+	t.Parallel()
+
+	input := normalizeConfigNamespaceInput(ConfigNamespaceInput{
+		Name:        "  Order Service  ",
+		Slug:        "  ORDER-SERVICE  ",
+		Description: "  order configuration  ",
+	})
+	if input.Name != "Order Service" || input.Slug != "order-service" || input.Description != "order configuration" {
+		t.Fatalf("normalizeConfigNamespaceInput() = %#v", input)
+	}
+	if err := validateConfigNamespaceInput(input); err != nil {
+		t.Fatalf("validateConfigNamespaceInput() error = %v", err)
+	}
+
+	invalid := input
+	invalid.Slug = "invalid namespace"
+	if err := validateConfigNamespaceInput(invalid); !errors.Is(err, ErrConfigNamespaceInvalid) {
+		t.Fatalf("validateConfigNamespaceInput() error = %v, want ErrConfigNamespaceInvalid", err)
+	}
+}

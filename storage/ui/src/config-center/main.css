@@ -16,6 +16,19 @@ button:disabled { @apply cursor-not-allowed opacity-50; }
 .btn-danger-ghost { @apply inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-rose-600 hover:bg-rose-50; }
 .icon-button { @apply grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800; }
 .sidebar-restore-button { @apply inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700; }
+.namespace-switcher { @apply relative; }
+.namespace-switcher-trigger { @apply flex h-11 min-w-56 max-w-72 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/40; }
+.namespace-switcher-trigger > code { @apply max-w-24 truncate rounded-md bg-slate-100 px-2 py-1 text-[11px] text-slate-500; }
+.namespace-switcher-label { @apply min-w-0 flex-1; }
+.namespace-switcher-label small { @apply block text-[10px] leading-3 text-slate-400; }
+.namespace-switcher-label strong { @apply block truncate text-sm font-semibold text-slate-700; }
+.namespace-switcher-menu { @apply absolute left-0 top-[calc(100%+6px)] z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl isolate; }
+.namespace-switcher-menu .select-menu-scroll { @apply max-h-72; }
+.namespace-switcher-option { @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-900; }
+.namespace-switcher-option-selected { @apply bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700; }
+.namespace-switcher-footer { @apply mt-1 grid grid-cols-2 gap-1 border-t border-slate-100 pt-1; }
+.namespace-switcher-footer button { @apply flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50; }
+.namespace-switcher-footer button > span { @apply inline-grid h-5 w-5 shrink-0 place-items-center text-base; }
 .panel { @apply rounded-2xl border border-slate-200 bg-white shadow-sm; }
 .panel-header { @apply flex min-h-20 flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4; }
 .panel-content-clip { @apply overflow-hidden rounded-b-2xl; }

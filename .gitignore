@@ -395,6 +395,15 @@ $RECYCLE.BIN/
 /tmp/
 go.work.sum
 /storage/*/*
+!/storage/ui/package.json
+!/storage/ui/package-lock.json
+!/storage/ui/vite.config.js
+!/storage/ui/src/
+!/storage/ui/src/**
+!/storage/ui/scripts/
+!/storage/ui/scripts/**
+!/storage/views/config-center/
+!/storage/views/config-center/*.html
 stats.html
 *.key
 !/storage/*/*.html

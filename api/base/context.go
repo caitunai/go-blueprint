@@ -87,7 +87,7 @@ func (c *Context) Origin() string {
 }
 
 func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
-	if viper.GetString("mode") != "release" {
+	if viper.GetString("ui.assetMode") == "vite" {
 		return
 	}
 	manifest := storage.ParseManifest()
@@ -153,9 +153,26 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 	})
 }
 
+func (c *Context) UnauthorizedAPIKey(realm, message string, data gin.H) {
+	c.Header("WWW-Authenticate", "ApiKey realm="+strconv.Quote(realm))
+	c.JSON(http.StatusUnauthorized, gin.H{
+		KeyStatus:  http.StatusUnauthorized,
+		KeyMessage: message,
+		KeyData:    data,
+	})
+}
+
 func (c *Context) Forbidden(message string, data gin.H) {
 	c.response(http.StatusForbidden, gin.H{
 		KeyStatus:  http.StatusForbidden,
+		KeyMessage: message,
+		KeyData:    data,
+	})
+}
+
+func (c *Context) Conflict(message string, data gin.H) {
+	c.response(http.StatusConflict, gin.H{
+		KeyStatus:  http.StatusConflict,
 		KeyMessage: message,
 		KeyData:    data,
 	})

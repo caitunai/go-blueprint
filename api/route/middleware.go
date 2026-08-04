@@ -18,14 +18,21 @@ import (
 )
 
 var (
-	jwtSecret         []byte
-	publicKey         *rsa.PublicKey
-	oauthCallbackPath = "oauth/path/to/callback"
+	jwtSecret             []byte
+	publicKey             *rsa.PublicKey
+	oauthCallbackPath     = "oauth/path/to/callback"
+	configCenterIsEnabled bool
+	configCenterAuth      gin.HandlerFunc
 )
 
 const unauthorizedMessage = "unauthorized"
 
 func InitMiddleware() {
+	configureConfigCenterAccess(
+		viper.GetBool("configcenter.enabled"),
+		viper.GetString("configcenter.username"),
+		viper.GetString("configcenter.password"),
+	)
 	jwtSecret = []byte(viper.GetString("auth.api.secret"))
 	publicKeyByte, err := os.ReadFile(viper.GetString("oauth.publicKeyPath"))
 	if err != nil {
@@ -37,6 +44,28 @@ func InitMiddleware() {
 		log.Error().Err(err).Msg("parse oauth public key failed")
 		return
 	}
+}
+
+func configureConfigCenterAccess(enabled bool, username, password string) {
+	configCenterIsEnabled = enabled
+	configCenterAuth = nil
+	if enabled {
+		configCenterAuth = gin.BasicAuth(gin.Accounts{username: password})
+	}
+}
+
+func configCenterEnabled(c *base.Context) {
+	if !configCenterIsEnabled {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	c.Next()
+}
+
+func configCenterNoStore(c *base.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Vary", "Authorization")
+	c.Next()
 }
 
 // This middleware can be used to verify the login status of real users.
@@ -67,15 +96,17 @@ func apiAuthorized(c *base.Context) {
 
 func AttemptAuth() base.HandlerFunc {
 	return func(c *base.Context) {
+		if isConfigCenterPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		var uid uint64
 		id, _ := c.DecodeCookie("session_id")
 		if id != "" {
 			uid, _ = strconv.ParseUint(id, 10, 64)
 		}
 		if uid == 0 {
-			bearerToken := c.GetHeader("Authorization")
-			bearerToken = strings.TrimPrefix(bearerToken, "Bearer")
-			bearerToken = strings.TrimSpace(bearerToken)
+			bearerToken := getBearerToken(c.GetHeader("Authorization"))
 			if bearerToken != "" {
 				var accountID uint64
 				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
@@ -91,7 +122,7 @@ func AttemptAuth() base.HandlerFunc {
 					return publicKey, nil
 				})
 				if err != nil {
-					log.Error().Err(err).Msgf("parse token error: %s", bearerToken)
+					log.Error().Err(err).Msg("parse bearer token error")
 					accountID = 0
 				} else {
 					sub, err := token.Claims.GetSubject()
@@ -142,6 +173,18 @@ func AttemptAuth() base.HandlerFunc {
 		c.Set("uid", uint(uid))
 		c.Next()
 	}
+}
+
+func isConfigCenterPath(path string) bool {
+	return path == "/config-center" || strings.HasPrefix(path, "/config-center/")
+}
+
+func getBearerToken(authorization string) string {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(authorization), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(token)
 }
 
 func AuthorizedAllowSpider() base.HandlerFunc {

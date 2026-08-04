@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/services/configload"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -16,9 +17,10 @@ var cfgFile string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "app",
-	Short: "A golang application",
-	Long:  "A golang application server, with api and website ui",
+	Use:               "app",
+	Short:             "A golang application",
+	Long:              "A golang application server, with api and website ui",
+	PersistentPreRunE: initializeRootConfiguration,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
@@ -34,6 +36,7 @@ func Execute() {
 }
 
 func init() {
+	cobra.EnableTraverseRunHooks = true
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(
 		&cfgFile,
@@ -41,6 +44,28 @@ func init() {
 		"",
 		"config file (default is $HOME/.app.toml)",
 	)
+}
+
+func initializeRootConfiguration(cmd *cobra.Command, _ []string) error {
+	// The generate command bootstraps the first keyring and therefore cannot
+	// depend on an already readable encrypted configuration source.
+	source := configload.Source(strings.ToLower(strings.TrimSpace(viper.GetString("configload.source"))))
+	if cmd != generateConfigKeyCmd {
+		if err := configureConfigEncryption(); err != nil {
+			return err
+		}
+	}
+	if !shouldLoadPublishedConfiguration(cmd, viper.GetBool("configload.enabled"), source) {
+		return nil
+	}
+	if err := loadPublishedConfiguration(cmd.Context()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func shouldLoadPublishedConfiguration(cmd *cobra.Command, enabled bool, source configload.Source) bool {
+	return enabled && (cmd != generateConfigKeyCmd || source != configload.SourceDatabase)
 }
 
 func initConfig() {
@@ -61,11 +86,11 @@ func initConfig() {
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err == nil {
 		log.Trace().Msgf("Using config file: %s", viper.ConfigFileUsed())
-		if viper.GetString("db.database") != "" {
-			db.Conn()
-		}
 	} else {
 		log.Trace().Err(err).Send()
+	}
+	if viper.GetString("db.database") != "" {
+		db.Conn()
 	}
 	initLogger()
 }

@@ -5,8 +5,34 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caitunai/go-blueprint/services/configload"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+func TestRootCommandLoadsPublishedConfigurationForChildCommands(t *testing.T) {
+	t.Parallel()
+
+	if rootCmd.PersistentPreRunE == nil {
+		t.Fatal("root command does not register the configuration hook")
+	}
+	if !cobra.EnableTraverseRunHooks {
+		t.Fatal("Cobra parent hook traversal is disabled")
+	}
+	if !shouldLoadPublishedConfiguration(serveCmd, true, configload.SourceDatabase) ||
+		!shouldLoadPublishedConfiguration(queueCmd, true, configload.SourceHTTP) {
+		t.Fatal("regular child commands do not load published configuration")
+	}
+	if shouldLoadPublishedConfiguration(generateConfigKeyCmd, true, configload.SourceDatabase) {
+		t.Fatal("config-key generate must skip database configuration loading")
+	}
+	if !shouldLoadPublishedConfiguration(generateConfigKeyCmd, true, configload.SourceHTTP) {
+		t.Fatal("config-key generate unexpectedly skips HTTP configuration loading")
+	}
+	if shouldLoadPublishedConfiguration(serveCmd, false, configload.SourceHTTP) {
+		t.Fatal("disabled published configuration unexpectedly loads")
+	}
+}
 
 func TestMergePublishedConfigurationOverridesBusinessConfigAndProtectsBootstrap(t *testing.T) {
 	t.Parallel()

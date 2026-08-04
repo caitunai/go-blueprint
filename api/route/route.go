@@ -15,7 +15,10 @@ func InitRoute(r *base.Router) {
 
 func initPackageHandler(r *base.Router) {
 	r.GET("/", handler.HomePage)
-	configCenter := r.Group("/config-center", configCenterEnabled, configCenterBasicAuth)
+	configCenter := r.Group("/config-center", configCenterEnabled, configCenterNoStore)
+	if configCenterAuth != nil {
+		configCenter.RouterGroup.Use(configCenterAuth)
+	}
 	configCenter.GET("", handler.ConfigCenterPage)
 	handler.ConfigCenterControl(configCenter.Group("/api"))
 

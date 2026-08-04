@@ -13,6 +13,7 @@ const (
 	testConfigCenterUsername = "config-admin"
 	testConfigCenterPassword = "correct horse battery staple"
 	testBearerToken          = "token-value"
+	testBasicAuthChallenge   = `Basic realm="Authorization Required"`
 )
 
 func TestConfigCenterAccessMiddleware(t *testing.T) {
@@ -72,8 +73,14 @@ func TestConfigCenterAccessMiddleware(t *testing.T) {
 			configureConfigCenterAccess(tt.enabled, tt.username, tt.password)
 			engine := gin.New()
 			router := base.NewRouter(engine)
-			group := router.Group("/config-center", configCenterEnabled, configCenterBasicAuth)
+			group := router.Group("/config-center", configCenterEnabled, configCenterNoStore)
+			if configCenterAuth != nil {
+				group.RouterGroup.Use(configCenterAuth)
+			}
 			group.GET("", func(c *base.Context) {
+				if tt.wantStatus == http.StatusOK && c.GetString(gin.AuthUserKey) != tt.username {
+					t.Errorf("authenticated user = %q, want %q", c.GetString(gin.AuthUserKey), tt.username)
+				}
 				c.Status(http.StatusOK)
 			})
 
@@ -87,8 +94,8 @@ func TestConfigCenterAccessMiddleware(t *testing.T) {
 			if response.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", response.Code, tt.wantStatus)
 			}
-			if got := response.Header().Get("WWW-Authenticate"); tt.wantChallenge && got != configCenterBasicRealm {
-				t.Fatalf("WWW-Authenticate = %q, want %q", got, configCenterBasicRealm)
+			if got := response.Header().Get("WWW-Authenticate"); tt.wantChallenge && got != testBasicAuthChallenge {
+				t.Fatalf("WWW-Authenticate = %q, want %q", got, testBasicAuthChallenge)
 			}
 		})
 	}

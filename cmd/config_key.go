@@ -50,9 +50,6 @@ var reencryptConfigCmd = &cobra.Command{
 	Short: "Encrypt plaintext configuration data and rotate stored data keys",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := configureConfigEncryption(); err != nil {
-			return errors.Join(ErrConfigKeyCommand, err)
-		}
 		result, err := db.ReencryptConfigStorage(cmd.Context())
 		if err != nil {
 			return errors.Join(ErrConfigKeyCommand, err)

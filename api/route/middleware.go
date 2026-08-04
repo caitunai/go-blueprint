@@ -2,8 +2,6 @@ package route
 
 import (
 	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"os"
@@ -20,18 +18,14 @@ import (
 )
 
 var (
-	jwtSecret                  []byte
-	publicKey                  *rsa.PublicKey
-	oauthCallbackPath          = "oauth/path/to/callback"
-	configCenterIsEnabled      bool
-	configCenterUsernameDigest [sha256.Size]byte
-	configCenterPasswordDigest [sha256.Size]byte
+	jwtSecret             []byte
+	publicKey             *rsa.PublicKey
+	oauthCallbackPath     = "oauth/path/to/callback"
+	configCenterIsEnabled bool
+	configCenterAuth      gin.HandlerFunc
 )
 
-const (
-	unauthorizedMessage    = "unauthorized"
-	configCenterBasicRealm = `Basic realm="config-center", charset="UTF-8"`
-)
+const unauthorizedMessage = "unauthorized"
 
 func InitMiddleware() {
 	configureConfigCenterAccess(
@@ -54,8 +48,10 @@ func InitMiddleware() {
 
 func configureConfigCenterAccess(enabled bool, username, password string) {
 	configCenterIsEnabled = enabled
-	configCenterUsernameDigest = sha256.Sum256([]byte(username))
-	configCenterPasswordDigest = sha256.Sum256([]byte(password))
+	configCenterAuth = nil
+	if enabled {
+		configCenterAuth = gin.BasicAuth(gin.Accounts{username: password})
+	}
 }
 
 func configCenterEnabled(c *base.Context) {
@@ -66,20 +62,9 @@ func configCenterEnabled(c *base.Context) {
 	c.Next()
 }
 
-func configCenterBasicAuth(c *base.Context) {
+func configCenterNoStore(c *base.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Vary", "Authorization")
-	username, password, ok := c.Request.BasicAuth()
-	usernameDigest := sha256.Sum256([]byte(username))
-	passwordDigest := sha256.Sum256([]byte(password))
-	usernameMatches := subtle.ConstantTimeCompare(usernameDigest[:], configCenterUsernameDigest[:])
-	passwordMatches := subtle.ConstantTimeCompare(passwordDigest[:], configCenterPasswordDigest[:])
-	authorized := usernameMatches&passwordMatches == 1
-	if !ok || !authorized {
-		c.Header("WWW-Authenticate", configCenterBasicRealm)
-		c.AbortWithStatus(http.StatusUnauthorized)
-		return
-	}
 	c.Next()
 }
 

@@ -196,9 +196,13 @@ sensitive values.
 ### Loading published configuration into Viper
 
 The application can merge the latest published configuration for one
-environment into Viper during `serve` startup. `.app.toml` remains the
-bootstrap source and selects either a trusted direct database read or the
-runtime HTTP API. Draft configuration is never loaded.
+environment into Viper from the root command before any child command runs.
+This makes the same configuration available to `serve`, `queue`, migration,
+and other commands. `.app.toml` remains the bootstrap source and selects either
+a trusted direct database read or the runtime HTTP API. Draft configuration is
+never loaded. With the database source, `config-key generate` intentionally
+skips remote loading because it may be creating the first keyring required to
+decrypt that source; the HTTP source remains available to the command.
 
 For a direct database read, configure the loader together with the existing
 `[db]` settings:

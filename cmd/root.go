@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/caitunai/go-blueprint/db"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -62,6 +63,9 @@ func initConfig() {
 		log.Trace().Msgf("Using config file: %s", viper.ConfigFileUsed())
 	} else {
 		log.Trace().Err(err).Send()
+	}
+	if viper.GetString("db.database") != "" {
+		db.Conn()
 	}
 	initLogger()
 }

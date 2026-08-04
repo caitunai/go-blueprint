@@ -3,7 +3,6 @@ package cmd
 import (
 	"github.com/caitunai/go-blueprint/api/server"
 	"github.com/caitunai/go-blueprint/cache"
-	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
 	"github.com/rs/zerolog/log"
@@ -23,7 +22,6 @@ var serveCmd = &cobra.Command{
 		if err := configureConfigEncryption(); err != nil {
 			return err
 		}
-		db.Conn()
 		if err := loadPublishedConfiguration(cmd.Context()); err != nil {
 			return err
 		}

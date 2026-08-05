@@ -411,4 +411,6 @@ stats.html
 !/storage/ui/dist/
 /storage/ui/dist/*
 !/storage/ui/dist/keep.txt
+.env.production
+deploy.sh
 go-blueprint

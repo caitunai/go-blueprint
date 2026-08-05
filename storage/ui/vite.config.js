@@ -6,6 +6,8 @@ import { defineConfig } from "vite";
 
 const keepFileContent = "This file keeps the embedded UI dist directory present before assets are built.\n";
 const viewsDirectory = fileURLToPath(new URL("../views", import.meta.url));
+const configCenterDiffsThemeBundle = fileURLToPath(new URL("./src/config-center/diffs-theme-bundle.js", import.meta.url));
+const configCenterShikiBundle = fileURLToPath(new URL("./src/config-center/shiki-bundle.js", import.meta.url));
 const tailwindImportPattern = /@import\s+["']tailwindcss["'][^;]*;/;
 
 function includeGoTemplateSources() {
@@ -38,6 +40,12 @@ function preserveDistPlaceholder() {
 
 export default defineConfig({
   plugins: [includeGoTemplateSources(), tailwindcss(), preserveDistPlaceholder()],
+  resolve: {
+    alias: [
+      { find: /^@pierre\/theming\/themes$/, replacement: configCenterDiffsThemeBundle },
+      { find: /^shiki$/, replacement: configCenterShikiBundle },
+    ],
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

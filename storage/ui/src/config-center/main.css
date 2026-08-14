@@ -160,6 +160,10 @@ textarea.config-value { @apply min-h-16 resize-y py-2; }
 .format-select-menu { @apply absolute right-0 top-[calc(100%+4px)] z-50 min-w-32 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl isolate; }
 .published-version-menu { @apply min-w-64; }
 .published-version-option { @apply whitespace-nowrap; }
+.release-reason { @apply border-b border-slate-200 bg-slate-50 px-5 py-4; }
+.release-reason-header { @apply flex items-center justify-between gap-3 text-xs font-medium text-slate-500; }
+.release-reason-header code { @apply rounded-md bg-white px-2 py-1 text-[11px] text-slate-500 ring-1 ring-slate-200; }
+.release-reason p { @apply mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700; }
 .comparison-source-menu { @apply max-h-80 p-2; }
 .comparison-source-menu .select-menu-scroll { max-height: calc(20rem - 1rem); }
 .comparison-tree-row { @apply relative py-1; }
@@ -193,6 +197,11 @@ textarea.config-value { @apply min-h-16 resize-y py-2; }
 .confirmation-targets { @apply mt-4 max-h-52 space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-2; }
 .confirmation-target { @apply flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5; }
 .confirmation-target-id { @apply shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600; }
+.publish-reason-field { @apply mt-5 block; }
+.publish-reason-field > span { @apply flex items-center gap-2 text-sm font-medium text-slate-700; }
+.publish-reason-field strong { @apply rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600; }
+.publish-reason-input { @apply mt-2 block min-h-24 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500; }
+.publish-reason-field small { @apply mt-1.5 block text-right text-[10px] text-slate-400; }
 .field-label { @apply block text-sm font-medium text-slate-700; }
 .field-help { @apply mt-1.5 block text-xs font-normal text-slate-400; }
 .text-input { @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500; }

@@ -139,6 +139,11 @@ table "gb_config_releases" {
     null = false
     type = mediumtext
   }
+  column "reason" {
+    null    = false
+    type    = varchar(1000)
+    default = ""
+  }
   column "created_at" {
     null    = false
     type    = timestamp

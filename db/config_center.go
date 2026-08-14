@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caitunai/go-blueprint/services/configcrypt"
 	"github.com/rs/zerolog/log"
@@ -23,44 +24,48 @@ import (
 )
 
 const (
-	configLockUpdate           = "UPDATE"
-	MaxConfigBytes             = 512 * 1024
-	MaxConfigDescriptionBytes  = 512 * 1024
-	maxConfigDepth             = 32
-	maxConfigNodes             = 5000
-	maxConfigCollection        = 1000
-	maxConfigKeyLength         = 128
-	maxConfigStringLength      = 64 * 1024
-	maxConfigDescriptionLength = 2000
-	maxConfigEnvironments      = 100
-	maxConfigNamespaces        = 50
-	minConfigAPIKeyLength      = 32
-	maxConfigAPIKeyLength      = 256
-	maxEnvironmentDepth        = 16
-	configReencryptBatchSize   = 100
-	payloadDraftConfig         = "draft-config"
-	payloadDraftDescriptions   = "draft-descriptions"
-	payloadReleaseConfig       = "release-config"
-	payloadReleaseDescriptions = "release-descriptions"
-	payloadNamespaceAPIKey     = "namespace-api-key"
-	columnDraftConfig          = "draft_config"
-	columnDraftDescriptions    = "draft_descriptions"
+	configLockUpdate             = "UPDATE"
+	MaxConfigBytes               = 512 * 1024
+	MaxConfigDescriptionBytes    = 512 * 1024
+	maxConfigDepth               = 32
+	maxConfigNodes               = 5000
+	maxConfigCollection          = 1000
+	maxConfigKeyLength           = 128
+	maxConfigStringLength        = 64 * 1024
+	maxConfigDescriptionLength   = 2000
+	maxConfigReleaseReasonLength = 1000
+	maxConfigEnvironments        = 100
+	maxConfigNamespaces          = 50
+	minConfigAPIKeyLength        = 32
+	maxConfigAPIKeyLength        = 256
+	maxEnvironmentDepth          = 16
+	configReencryptBatchSize     = 100
+	payloadDraftConfig           = "draft-config"
+	payloadDraftDescriptions     = "draft-descriptions"
+	payloadReleaseConfig         = "release-config"
+	payloadReleaseDescriptions   = "release-descriptions"
+	payloadNamespaceAPIKey       = "namespace-api-key"
+	columnDraftConfig            = "draft_config"
+	columnDraftDescriptions      = "draft_descriptions"
 )
 
 var (
-	ErrConfigNamespaceNotFound   = errors.New("config namespace not found")
-	ErrConfigNamespaceInvalid    = errors.New("invalid config namespace")
-	ErrConfigNamespaceConflict   = errors.New("config namespace conflicts with existing data")
-	ErrConfigAPIKeyInvalid       = errors.New("invalid config namespace API key")
-	ErrConfigAPIKeyUnauthorized  = errors.New("config namespace API key is unauthorized")
-	ErrConfigEncryptionRequired  = errors.New("config encryption is required")
-	ErrConfigEnvironmentNotFound = errors.New("config environment not found")
-	ErrConfigInvalid             = errors.New("invalid configuration")
-	ErrConfigEnvironmentInvalid  = errors.New("invalid config environment")
-	ErrConfigEnvironmentConflict = errors.New("config environment conflicts with existing data")
-	ErrConfigEnvironmentInUse    = errors.New("config environment is inherited by another environment")
-	ErrConfigReleaseNotFound     = errors.New("published configuration not found")
-	ErrConfigStorage             = errors.New("config storage operation failed")
+	ErrConfigNamespaceNotFound     = errors.New("config namespace not found")
+	ErrConfigNamespaceInvalid      = errors.New("invalid config namespace")
+	ErrConfigNamespaceConflict     = errors.New("config namespace conflicts with existing data")
+	ErrConfigAPIKeyInvalid         = errors.New("invalid config namespace API key")
+	ErrConfigAPIKeyUnauthorized    = errors.New("config namespace API key is unauthorized")
+	ErrConfigEncryptionRequired    = errors.New("config encryption is required")
+	ErrConfigEnvironmentNotFound   = errors.New("config environment not found")
+	ErrConfigInvalid               = errors.New("invalid configuration")
+	ErrConfigEnvironmentInvalid    = errors.New("invalid config environment")
+	ErrConfigEnvironmentConflict   = errors.New("config environment conflicts with existing data")
+	ErrConfigEnvironmentInUse      = errors.New("config environment is inherited by another environment")
+	ErrConfigReleaseNotFound       = errors.New("published configuration not found")
+	ErrConfigReleaseInvalid        = errors.New("invalid config release")
+	ErrConfigStorage               = errors.New("config storage operation failed")
+	errConfigReleaseReasonRequired = errors.New("config release reason is required")
+	errConfigReleaseReasonTooLong  = errors.New("config release reason is too long")
 
 	configSlugPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 	configAPIKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
@@ -102,6 +107,7 @@ type ConfigRelease struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	BatchID       string    `gorm:"size:32;not null;index" json:"batch_id"`
+	Reason        string    `gorm:"size:1000;not null;default:''" json:"reason"`
 	Config        string    `gorm:"type:mediumtext;not null" json:"-"`
 	Descriptions  string    `gorm:"type:mediumtext;not null" json:"-"`
 	ID            uint      `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -135,6 +141,7 @@ type PublishedConfig struct {
 	Config        map[string]any     `json:"config"`
 	Descriptions  ConfigDescriptions `json:"descriptions"`
 	BatchID       string             `json:"batch_id"`
+	Reason        string             `json:"reason"`
 	EnvironmentID uint               `json:"environment_id"`
 	Version       uint64             `json:"version"`
 }
@@ -144,13 +151,20 @@ type ConfigDescriptions map[string]string
 type ConfigReleaseSummary struct {
 	PublishedAt   time.Time `json:"published_at"`
 	BatchID       string    `json:"batch_id"`
+	Reason        string    `json:"reason"`
 	EnvironmentID uint      `json:"environment_id"`
 	Version       uint64    `json:"version"`
 }
 
 type ConfigPublishResult struct {
 	BatchID  string            `json:"batch_id"`
+	Reason   string            `json:"reason"`
 	Releases []PublishedConfig `json:"releases"`
+}
+
+type ConfigPublishInput struct {
+	Reason         string
+	EnvironmentIDs []uint
 }
 
 type ConfigReencryptResult struct {
@@ -671,16 +685,24 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 	}, nil
 }
 
-func PublishConfigs(ctx context.Context, namespaceID uint, environmentIDs []uint) (*ConfigPublishResult, error) {
-	ids := uniqueSortedIDs(environmentIDs)
+func PublishConfigs(ctx context.Context, namespaceID uint, input ConfigPublishInput) (*ConfigPublishResult, error) {
+	input.Reason = strings.TrimSpace(input.Reason)
+	if err := validateConfigPublishInput(input); err != nil {
+		return nil, err
+	}
+	ids := uniqueSortedIDs(input.EnvironmentIDs)
 	if len(ids) == 0 || len(ids) > maxConfigEnvironments {
-		return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("select between 1 and 100 environments"))
+		return nil, ErrConfigEnvironmentInvalid
 	}
 	batchID, err := newConfigBatchID()
 	if err != nil {
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
-	result := &ConfigPublishResult{BatchID: batchID, Releases: make([]PublishedConfig, 0, len(ids))}
+	result := &ConfigPublishResult{
+		BatchID:  batchID,
+		Reason:   input.Reason,
+		Releases: make([]PublishedConfig, 0, len(ids)),
+	}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
@@ -710,6 +732,7 @@ func PublishConfigs(ctx context.Context, namespaceID uint, environmentIDs []uint
 			release := &ConfigRelease{
 				EnvironmentID: id,
 				BatchID:       batchID,
+				Reason:        input.Reason,
 				Version:       latest + 1,
 			}
 			storedConfig, err := encryptConfigPayload([]byte(encoded), releasePayloadContext(namespaceID, id, release.Version, payloadReleaseConfig))
@@ -728,6 +751,7 @@ func PublishConfigs(ctx context.Context, namespaceID uint, environmentIDs []uint
 			result.Releases = append(result.Releases, PublishedConfig{
 				EnvironmentID: id,
 				BatchID:       batchID,
+				Reason:        release.Reason,
 				Version:       release.Version,
 				Config:        resolved.Config,
 				Descriptions:  resolved.Descriptions,
@@ -740,6 +764,16 @@ func PublishConfigs(ctx context.Context, namespaceID uint, environmentIDs []uint
 		return nil, errors.Join(ErrConfigStorage, err)
 	}
 	return result, nil
+}
+
+func validateConfigPublishInput(input ConfigPublishInput) error {
+	if strings.TrimSpace(input.Reason) == "" {
+		return errors.Join(ErrConfigReleaseInvalid, errConfigReleaseReasonRequired)
+	}
+	if utf8.RuneCountInString(input.Reason) > maxConfigReleaseReasonLength {
+		return errors.Join(ErrConfigReleaseInvalid, errConfigReleaseReasonTooLong)
+	}
+	return nil
 }
 
 func encodeResolvedConfig(resolved *ResolvedConfig) (string, string, error) {
@@ -876,7 +910,7 @@ func ListConfigReleases(ctx context.Context, namespaceID, environmentID uint) ([
 	releases := make([]ConfigReleaseSummary, 0)
 	if err := DB().WithContext(ctx).
 		Model(&ConfigRelease{}).
-		Select("environment_id, batch_id, version, created_at AS published_at").
+		Select("environment_id, batch_id, reason, version, created_at AS published_at").
 		Where("environment_id = ?", environmentID).
 		Order("version DESC").
 		Scan(&releases).Error; err != nil {
@@ -892,7 +926,7 @@ func ListAllConfigReleases(ctx context.Context, namespaceID uint) ([]ConfigRelea
 	releases := make([]ConfigReleaseSummary, 0)
 	if err := DB().WithContext(ctx).
 		Model(&ConfigRelease{}).
-		Select("environment_id, batch_id, version, created_at AS published_at").
+		Select("environment_id, batch_id, reason, version, created_at AS published_at").
 		Where("environment_id IN (?)", DB().Model(&ConfigEnvironment{}).Select("id").Where("namespace_id = ?", namespaceID)).
 		Order("environment_id ASC, version DESC").
 		Scan(&releases).Error; err != nil {
@@ -917,6 +951,7 @@ func publishedConfigFromRelease(namespaceID uint, release ConfigRelease) (*Publi
 	return &PublishedConfig{
 		EnvironmentID: release.EnvironmentID,
 		BatchID:       release.BatchID,
+		Reason:        release.Reason,
 		Version:       release.Version,
 		Config:        config,
 		Descriptions:  descriptions,

@@ -49,6 +49,7 @@ type configDraftForm struct {
 }
 
 type configPublishForm struct {
+	Reason         string `json:"reason" binding:"required,max=1000"`
 	EnvironmentIDs []uint `json:"environment_ids" binding:"required,min=1,max=100"`
 }
 
@@ -338,6 +339,7 @@ func getPublishedEnvironmentConfig(c *base.Context) {
 			},
 			"version":      published.Version,
 			"batch_id":     published.BatchID,
+			"reason":       published.Reason,
 			"published_at": published.PublishedAt,
 			"config":       published.Config,
 			"descriptions": published.Descriptions,
@@ -423,10 +425,13 @@ func publishConfigs(c *base.Context) {
 	}
 	form := &configPublishForm{}
 	if err := c.ShouldBindJSON(form); err != nil {
-		c.ErrorForm("请选择需要发布的环境", gin.H{KeyError: err.Error()})
+		c.ErrorForm("请选择需要发布的环境并填写发布原因", gin.H{KeyError: err.Error()})
 		return
 	}
-	result, err := db.PublishConfigs(c.Request.Context(), namespaceID, form.EnvironmentIDs)
+	result, err := db.PublishConfigs(c.Request.Context(), namespaceID, db.ConfigPublishInput{
+		EnvironmentIDs: form.EnvironmentIDs,
+		Reason:         form.Reason,
+	})
 	if err != nil {
 		respondConfigError(c, err)
 		return
@@ -515,6 +520,8 @@ func respondConfigError(c *base.Context, err error) {
 		c.NotFound("配置环境不存在", gin.H{})
 	case errors.Is(err, db.ErrConfigReleaseNotFound):
 		c.NotFound("该环境尚未发布", gin.H{})
+	case errors.Is(err, db.ErrConfigReleaseInvalid):
+		c.ErrorForm("请填写 1 至 1000 个字符的发布原因", gin.H{})
 	case errors.Is(err, db.ErrConfigEnvironmentConflict):
 		c.Conflict("环境标识已存在", gin.H{})
 	case errors.Is(err, db.ErrConfigEnvironmentInUse):

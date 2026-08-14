@@ -563,7 +563,7 @@ function configCenterApp() {
     namespaceForm: { id: 0, name: "", slug: "", description: "", api_key: "", api_key_configured: false },
     environmentForm: { id: 0, name: "", slug: "", description: "", parent_id: 0 },
     confirmation: {
-      open: false, kind: "", title: "", message: "", confirmLabel: "确认", tone: "primary", targetID: 0, targetNamespaceID: 0, targets: [], urlMode: "push",
+      open: false, kind: "", title: "", message: "", reason: "", confirmLabel: "确认", tone: "primary", targetID: 0, targetNamespaceID: 0, targets: [], urlMode: "push",
     },
 
     async init() {
@@ -1000,16 +1000,21 @@ function configCenterApp() {
       });
     },
 
-    async performPublish() {
+    async performPublish(reason) {
       this.publishing = true;
       try {
-        const data = await api(`${this.namespaceAPI()}/publish`, { method: "POST", body: { environment_ids: this.publishIDs } });
+        const data = await api(`${this.namespaceAPI()}/publish`, {
+          method: "POST",
+          body: { environment_ids: this.publishIDs, reason: reason.trim() },
+        });
         this.releases = [];
         await this.loadEnvironments();
         if (this.tab === "published") await this.loadPublishedVersions();
         this.notify(`发布成功，批次 ${data.publication.batch_id}`);
+        return true;
       } catch (error) {
         this.notify(error.message, "error");
+        return false;
       } finally {
         this.publishing = false;
       }
@@ -1021,6 +1026,7 @@ function configCenterApp() {
         kind,
         title,
         message,
+        reason: "",
         confirmLabel,
         tone,
         targetID,
@@ -1032,7 +1038,10 @@ function configCenterApp() {
           slug: environment.slug,
         })),
       };
-      this.$nextTick(() => this.$refs.confirmationButton?.focus());
+      this.$nextTick(() => {
+        if (kind === "publish") this.$refs.publishReason?.focus();
+        else this.$refs.confirmationButton?.focus();
+      });
     },
     closeConfirmation() {
       if (this.confirming) return;
@@ -1043,12 +1052,17 @@ function configCenterApp() {
     },
     async confirmPendingAction() {
       if (this.confirming) return;
-      const { kind, targetID, targetNamespaceID, urlMode } = this.confirmation;
+      const { kind, targetID, targetNamespaceID, urlMode, reason } = this.confirmation;
+      if (kind === "publish" && !reason.trim()) {
+        this.notify("请填写发布原因", "error");
+        this.$refs.publishReason?.focus();
+        return;
+      }
       this.confirming = true;
       try {
         if (kind === "delete") await this.performDeleteEnvironment(targetID);
         if (kind === "deleteNamespace") await this.performDeleteNamespace(targetNamespaceID);
-        if (kind === "publish") await this.performPublish();
+        if (kind === "publish" && !(await this.performPublish(reason))) return;
         if (kind === "discard") await this.selectEnvironment(targetID, true, urlMode);
         if (kind === "discardNamespace") await this.selectNamespace(targetNamespaceID, true, urlMode, targetID);
         this.confirmation.open = false;

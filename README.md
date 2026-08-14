@@ -3,7 +3,7 @@ The project template of Golang.
 
 ## How to use
 ```shell
-gonew github.com/caitunai/go-blueprint@v1.9.21 github.com/yourname/project
+gonew github.com/caitunai/go-blueprint@v1.9.22 github.com/yourname/project
 ```
 
 ## Install gonew
@@ -159,8 +159,10 @@ GET /config-center/api/runtime/{namespace}/{environment}?format=json
 
 Supported formats are `json` (default), `yaml`, `toml`, `env`, and `ini`.
 JSON uses the normal API response envelope and exposes configuration under
-`data.config` with descriptions under `data.descriptions`. Text formats return
-the configuration directly and include descriptions as comments.
+`data.config`, configuration descriptions under `data.descriptions`, and the
+release reason under `data.reason`. Text formats return the
+configuration directly and include configuration descriptions as comments;
+release metadata remains in the JSON response and response headers.
 
 Every namespace has its own API Key. It is accepted only through the
 `X-API-Key` request header, is never returned by the namespace API, and is

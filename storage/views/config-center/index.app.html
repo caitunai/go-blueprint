@@ -307,6 +307,13 @@
                   <button type="button" class="btn-secondary" :disabled="publishedConfigEmpty" @click="copyText(formattedPublished)">复制配置</button>
                 </div>
               </div>
+              <div x-show="!publishedLoading && publishedRelease" class="release-reason">
+                <div class="release-reason-header">
+                  <span>发布原因</span>
+                  <code x-text="publishedRelease ? `v${publishedRelease.version}` : ''"></code>
+                </div>
+                <p x-text="publishedRelease?.reason || '此历史版本未记录发布原因。'"></p>
+              </div>
               <div class="panel-content-clip">
                 <template x-if="publishedLoading"><div class="skeleton m-5 h-80"></div></template>
                 <template x-if="!publishedLoading && publishedRelease && !publishedConfigEmpty"><pre class="config-preview min-h-[480px]" x-text="formattedPublished"></pre></template>
@@ -585,13 +592,27 @@
             </div>
           </template>
         </div>
+        <label x-show="confirmation.kind === 'publish'" class="publish-reason-field">
+          <span>发布原因 <strong>必填</strong></span>
+          <textarea
+            x-ref="publishReason"
+            class="publish-reason-input"
+            rows="3"
+            maxlength="1000"
+            x-model="confirmation.reason"
+            @keydown.meta.enter.prevent="confirmPendingAction()"
+            @keydown.ctrl.enter.prevent="confirmPendingAction()"
+            placeholder="说明本次为什么更新和发布，例如：修复生产环境数据库连接配置"
+          ></textarea>
+          <small><span x-text="confirmation.reason.length"></span>/1000 · Ctrl/⌘ + Enter 发布</small>
+        </label>
         <div class="mt-6 flex justify-end gap-3">
           <button type="button" class="btn-secondary" :disabled="confirming" @click="closeConfirmation()">取消</button>
           <button
             type="button"
             x-ref="confirmationButton"
             :class="confirmation.tone === 'danger' ? 'btn-danger' : 'btn-primary'"
-            :disabled="confirming"
+            :disabled="confirming || (confirmation.kind === 'publish' && !confirmation.reason.trim())"
             @click="confirmPendingAction()"
             x-text="confirming ? '处理中…' : confirmation.confirmLabel"
           ></button>

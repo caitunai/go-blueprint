@@ -320,6 +320,25 @@ func TestUniqueSortedIDs(t *testing.T) {
 	}
 }
 
+func TestValidateConfigPublishInputRequiresBoundedReason(t *testing.T) {
+	t.Parallel()
+
+	valid := ConfigPublishInput{EnvironmentIDs: []uint{1}, Reason: "修复生产环境数据库连接配置"}
+	if err := validateConfigPublishInput(valid); err != nil {
+		t.Fatalf("validateConfigPublishInput() error = %v", err)
+	}
+	missing := valid
+	missing.Reason = "  "
+	if err := validateConfigPublishInput(missing); !errors.Is(err, ErrConfigReleaseInvalid) {
+		t.Fatalf("validateConfigPublishInput() missing reason error = %v, want ErrConfigReleaseInvalid", err)
+	}
+	tooLong := valid
+	tooLong.Reason = strings.Repeat("发", maxConfigReleaseReasonLength+1)
+	if err := validateConfigPublishInput(tooLong); !errors.Is(err, ErrConfigReleaseInvalid) {
+		t.Fatalf("validateConfigPublishInput() long reason error = %v, want ErrConfigReleaseInvalid", err)
+	}
+}
+
 func TestConfigNamespaceInputNormalizationAndValidation(t *testing.T) {
 	t.Parallel()
 

@@ -107,7 +107,7 @@ func listenTopic(ctx context.Context, topic string, kill chan os.Signal, wg *syn
 		wg.Done()
 	}()
 	topicPrefix := viper.GetString("queue.prefix")
-	messages, err := subscriber.Subscribe(ctx, topicPrefix+topic)
+	messages, err := subscriber.Subscribe(ctx, topicPrefix+":"+topic)
 	if err != nil {
 		log.Error().
 			Err(err).

@@ -19,7 +19,7 @@ func Publish(j job.Job) error {
 	m := make(message.Metadata)
 	m.Set("name", j.GetJobName())
 	topicPrefix := viper.GetString("queue.prefix")
-	err := publisher.Publish(topicPrefix+topic, &message.Message{
+	err := publisher.Publish(topicPrefix+":"+topic, &message.Message{
 		UUID:     watermill.NewUUID(),
 		Metadata: m,
 		Payload:  j.GetJobData(),

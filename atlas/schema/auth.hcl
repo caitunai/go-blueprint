@@ -1,5 +1,7 @@
 table "users" {
   schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
   column "id" {
     null = false
     type = bigint
@@ -16,6 +18,8 @@ table "users" {
 
 table "roles" {
   schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
   column "id" {
     null = false
     type = bigint
@@ -32,6 +36,8 @@ table "roles" {
 
 table "permissions" {
   schema = schema.default
+  charset = "utf8mb4"
+  collate = "utf8mb4_unicode_ci"
   column "id" {
     null = false
     type = bigint

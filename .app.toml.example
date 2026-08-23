@@ -86,7 +86,7 @@ apiKeyEnv="REGIONAL_CONFIG_API_KEY"
 timeout="8s"
 
 [configcrypt]
-enabled=true
+enabled=false
 provider="file"
 activeKey="config-key-v1"
 keyring="/absolute/path/to/config-center-keys.json"

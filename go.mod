@@ -1,6 +1,6 @@
 module github.com/caitunai/go-blueprint
 
-go 1.26.0
+go 1.27.0
 
 replace ariga.io/atlas => github.com/iflamed/atlas v1.0.1-0.20260508104337-7d20cf7155e2
 

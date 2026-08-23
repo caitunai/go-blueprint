@@ -63,7 +63,12 @@ func publishedConfigLoadSettings(config *viper.Viper) (configload.Settings, erro
 		}
 		apiKeyEnv := strings.TrimSpace(targets[index].HTTP.APIKeyEnv)
 		if apiKeyEnv != "" {
-			targets[index].HTTP.APIKey = os.Getenv(apiKeyEnv)
+			envKeyValue := os.Getenv(apiKeyEnv)
+			if envKeyValue != "" {
+				targets[index].HTTP.APIKey = envKeyValue
+			} else {
+				targets[index].HTTP.APIKey = apiKeyEnv
+			}
 		}
 	}
 	return configload.Settings{

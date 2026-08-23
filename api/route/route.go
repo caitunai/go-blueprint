@@ -3,6 +3,7 @@ package route
 import (
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/handler"
+	"github.com/spf13/viper"
 )
 
 func InitRoute(r *base.Router) {
@@ -22,6 +23,9 @@ func initPackageHandler(r *base.Router) {
 }
 
 func initConfigCenterHandler(r *base.Router) {
+	if !viper.GetBool("configcenter.enabled") {
+		return
+	}
 	configCenter := r.Group("/config-center", configCenterEnabled, configCenterNoStore)
 	if configCenterAuth != nil {
 		configCenter.RouterGroup.Use(configCenterAuth)

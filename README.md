@@ -351,6 +351,28 @@ source .env
 set +a
 ```
 
+### Synchronize the Atlas table prefix before generating migrations
+
+The GORM table prefix is configured separately from the Atlas schema:
+
+```toml
+[db.table]
+prefix="gb"
+```
+
+Changing `db.table.prefix` does not automatically rename the tables declared
+in Atlas. Before running `atlas migrate diff`, update every table definition in
+both `atlas/schema/auth.hcl` and `atlas/schema/config_center.hcl` to use the new
+prefix. GORM adds an underscore when a non-empty prefix does not already end in
+one, so `prefix="gb"` corresponds to Atlas table names such as `gb_users` and
+`gb_config_namespaces`.
+
+Also update HCL references that contain the table label, such as
+`table.gb_config_namespaces.column.id`. Do not generate a migration until both
+schema files, their references, and the configured prefix agree. If the
+generated SQL unexpectedly drops and recreates many tables, stop and check the
+prefixes before validating or applying the migration.
+
 ---
 
 ## 3. Generate the Baseline

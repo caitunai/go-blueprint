@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -49,23 +50,30 @@ func init() {
 func initializeRootConfiguration(cmd *cobra.Command, _ []string) error {
 	// The generate command bootstraps the first keyring and therefore cannot
 	// depend on an already readable encrypted configuration source.
-	source := configload.Source(strings.ToLower(strings.TrimSpace(viper.GetString("configload.source"))))
 	if cmd != generateConfigKeyCmd {
 		if err := configureConfigEncryption(); err != nil {
 			return err
 		}
 	}
-	if !shouldLoadPublishedConfiguration(cmd, viper.GetBool("configload.enabled"), source) {
+	enabled := viper.GetBool("configload.enabled")
+	if !enabled {
 		return nil
 	}
-	if err := loadPublishedConfiguration(cmd.Context()); err != nil {
+	settings, err := publishedConfigLoadSettings(viper.GetViper())
+	if err != nil {
+		return errors.Join(ErrPublishedConfigLoad, err)
+	}
+	if !shouldLoadPublishedConfiguration(cmd, enabled, settings) {
+		return nil
+	}
+	if err := loadPublishedConfiguration(cmd.Context(), settings); err != nil {
 		return err
 	}
 	return nil
 }
 
-func shouldLoadPublishedConfiguration(cmd *cobra.Command, enabled bool, source configload.Source) bool {
-	return enabled && (cmd != generateConfigKeyCmd || source != configload.SourceDatabase)
+func shouldLoadPublishedConfiguration(cmd *cobra.Command, enabled bool, settings configload.Settings) bool {
+	return enabled && (cmd != generateConfigKeyCmd || !configload.UsesSource(settings, configload.SourceDatabase))
 }
 
 func initConfig() {

@@ -57,15 +57,33 @@ password=""
 
 [configload]
 enabled=false
-# Use "database" for a trusted direct database load, or "http" for the runtime API.
-source="http"
-namespace=""
-environment=""
 
-[configload.http]
-baseURL="http://127.0.0.1:8080"
-apiKey=""
+# Targets are loaded and merged in declaration order. Later targets override
+# matching values from earlier targets. Each target selects its own source.
+[[configload.targets]]
+source="database"
+namespace="shared"
+environment="base"
+
+[[configload.targets]]
+source="http"
+namespace="my-service"
+environment="production"
+
+[configload.targets.http]
+baseURL="https://primary-config.example.com"
+apiKeyEnv="PRIMARY_CONFIG_API_KEY"
 timeout="5s"
+
+[[configload.targets]]
+source="http"
+namespace="regional-service"
+environment="production"
+
+[configload.targets.http]
+baseURL="https://regional-config.example.com"
+apiKeyEnv="REGIONAL_CONFIG_API_KEY"
+timeout="8s"
 
 [configcrypt]
 enabled=true

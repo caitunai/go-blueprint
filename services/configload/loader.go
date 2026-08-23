@@ -29,13 +29,14 @@ const (
 var (
 	ErrLoad               = errors.New("load published configuration failed")
 	ErrInvalidSettings    = errors.New("invalid published configuration loader settings")
-	ErrLoaderDisabled     = errors.New("published configuration loader is disabled")
-	ErrNamespaceInvalid   = errors.New("configload.namespace must be a valid namespace identifier")
-	ErrEnvironmentInvalid = errors.New("configload.environment must be a valid environment identifier")
-	ErrUnsupportedSource  = errors.New("configload.source must be database or http")
-	ErrHTTPBaseURLInvalid = errors.New("configload.http.baseURL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment")
-	ErrHTTPAPIKeyRequired = errors.New("configload.http.apiKey is required for the HTTP source")
-	ErrHTTPTimeoutInvalid = errors.New("configload.http.timeout must be greater than zero and at most one minute")
+	ErrTargetsRequired    = errors.New("configload.targets must contain at least one target")
+	ErrTargetDuplicate    = errors.New("configload.targets contains a duplicate source endpoint, namespace, and environment")
+	ErrNamespaceInvalid   = errors.New("configload target namespace must be a valid namespace identifier")
+	ErrEnvironmentInvalid = errors.New("configload target environment must be a valid environment identifier")
+	ErrUnsupportedSource  = errors.New("every configload target source must be database or http")
+	ErrHTTPBaseURLInvalid = errors.New("HTTP target baseURL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment")
+	ErrHTTPAPIKeyRequired = errors.New("an API key is required for every HTTP configload target")
+	ErrHTTPTimeoutInvalid = errors.New("HTTP target timeout must be greater than zero and at most one minute")
 	ErrDatabaseLoader     = errors.New("database configuration loader is unavailable")
 	ErrHTTP               = errors.New("published configuration HTTP request failed")
 	ErrInvalidResponse    = errors.New("invalid published configuration response")
@@ -43,17 +44,24 @@ var (
 )
 
 type Settings struct {
-	Source      Source
-	Namespace   string
-	Environment string
-	HTTP        HTTPSettings
-	Enabled     bool
+	Targets []Target
+}
+
+// Target identifies one immutable published environment and the source used to
+// retrieve it. API keys are populated from trusted bootstrap configuration and
+// are never included in errors.
+type Target struct {
+	Source      Source       `mapstructure:"source"`
+	Namespace   string       `mapstructure:"namespace"`
+	Environment string       `mapstructure:"environment"`
+	HTTP        HTTPSettings `mapstructure:"http"`
 }
 
 type HTTPSettings struct {
-	BaseURL string
-	APIKey  string
-	Timeout time.Duration
+	BaseURL   string        `mapstructure:"baseURL"`
+	APIKey    string        `mapstructure:"-"`
+	APIKeyEnv string        `mapstructure:"apiKeyEnv"`
+	Timeout   time.Duration `mapstructure:"timeout"`
 }
 
 type Result struct {
@@ -70,78 +78,160 @@ type HTTPStatusError struct {
 	StatusCode int
 }
 
+type TargetError struct {
+	Err         error
+	Source      Source
+	Namespace   string
+	Environment string
+	Index       int
+}
+
+func (e *TargetError) Error() string {
+	return "load config target " + strconv.Itoa(e.Index+1) + " (" + string(e.Source) + ":" +
+		e.Namespace + "/" + e.Environment + "): " + e.Err.Error()
+}
+
+func (e *TargetError) Unwrap() error { return e.Err }
+
 func (e *HTTPStatusError) Error() string {
 	return "published configuration HTTP status " + strconv.Itoa(e.StatusCode)
 }
 
-func Load(ctx context.Context, settings Settings, databaseLoader DatabaseLoader) (*Result, error) {
+// LoadAll loads every target in declaration order. Loading stops on the first
+// failure so callers never merge a partially loaded target set.
+func LoadAll(ctx context.Context, settings Settings, databaseLoader DatabaseLoader) ([]Result, error) {
 	settings = normalizeSettings(settings)
-	if err := validateSettings(settings); err != nil {
+	if err := validateSettings(settings, databaseLoader); err != nil {
 		return nil, errors.Join(ErrLoad, err)
 	}
-	var result *Result
-	var err error
-	switch settings.Source {
-	case SourceDatabase:
-		if databaseLoader == nil {
-			return nil, errors.Join(ErrLoad, ErrInvalidSettings, ErrDatabaseLoader)
+	results := make([]Result, 0, len(settings.Targets))
+	for index, target := range settings.Targets {
+		result, err := loadTarget(ctx, target, databaseLoader)
+		if err != nil {
+			return nil, errors.Join(ErrLoad, newTargetError(err, target, index))
 		}
-		result, err = databaseLoader(ctx, settings.Namespace, settings.Environment)
-	case SourceHTTP:
-		result, err = loadHTTP(ctx, settings)
-	default:
-		return nil, errors.Join(ErrLoad, ErrUnsupportedSource)
+		if result == nil || result.Config == nil {
+			return nil, errors.Join(ErrLoad, newTargetError(ErrInvalidResponse, target, index))
+		}
+		result.Source = target.Source
+		result.Namespace = target.Namespace
+		result.Environment = target.Environment
+		results = append(results, *result)
 	}
-	if err != nil {
-		return nil, errors.Join(ErrLoad, err)
-	}
-	if result == nil || result.Config == nil {
-		return nil, errors.Join(ErrLoad, ErrInvalidResponse)
-	}
-	result.Source = settings.Source
-	result.Namespace = settings.Namespace
-	result.Environment = settings.Environment
-	return result, nil
+	return results, nil
 }
 
 func normalizeSettings(settings Settings) Settings {
-	settings.Source = Source(strings.ToLower(strings.TrimSpace(string(settings.Source))))
-	settings.Namespace = strings.ToLower(strings.TrimSpace(settings.Namespace))
-	settings.Environment = strings.ToLower(strings.TrimSpace(settings.Environment))
-	settings.HTTP.BaseURL = strings.TrimRight(strings.TrimSpace(settings.HTTP.BaseURL), "/")
-	settings.HTTP.APIKey = strings.TrimSpace(settings.HTTP.APIKey)
+	targets := make([]Target, len(settings.Targets))
+	for index, target := range settings.Targets {
+		targets[index] = normalizeTarget(target)
+	}
+	settings.Targets = targets
 	return settings
 }
 
-func validateSettings(settings Settings) error {
-	if !settings.Enabled {
-		return errors.Join(ErrInvalidSettings, ErrLoaderDisabled)
+func normalizeTarget(target Target) Target {
+	target.Source = Source(strings.ToLower(strings.TrimSpace(string(target.Source))))
+	target.Namespace = strings.ToLower(strings.TrimSpace(target.Namespace))
+	target.Environment = strings.ToLower(strings.TrimSpace(target.Environment))
+	target.HTTP = normalizeHTTPSettings(target.HTTP)
+	return target
+}
+
+func normalizeHTTPSettings(settings HTTPSettings) HTTPSettings {
+	settings.BaseURL = strings.TrimRight(strings.TrimSpace(settings.BaseURL), "/")
+	settings.APIKey = strings.TrimSpace(settings.APIKey)
+	settings.APIKeyEnv = strings.TrimSpace(settings.APIKeyEnv)
+	return settings
+}
+
+func validateSettings(settings Settings, databaseLoader DatabaseLoader) error {
+	if len(settings.Targets) == 0 {
+		return errors.Join(ErrInvalidSettings, ErrTargetsRequired)
 	}
-	if !configSlugPattern.MatchString(settings.Namespace) {
-		return errors.Join(ErrInvalidSettings, ErrNamespaceInvalid)
+	seen := make(map[string]struct{}, len(settings.Targets))
+	for index, target := range settings.Targets {
+		if err := validateTarget(target, databaseLoader); err != nil {
+			return errors.Join(ErrInvalidSettings, newTargetError(err, target, index))
+		}
+		key := targetIdentity(target)
+		if _, exists := seen[key]; exists {
+			return errors.Join(ErrInvalidSettings, newTargetError(ErrTargetDuplicate, target, index))
+		}
+		seen[key] = struct{}{}
 	}
-	if !configSlugPattern.MatchString(settings.Environment) {
-		return errors.Join(ErrInvalidSettings, ErrEnvironmentInvalid)
+	return nil
+}
+
+func validateTarget(target Target, databaseLoader DatabaseLoader) error {
+	if !configSlugPattern.MatchString(target.Namespace) {
+		return ErrNamespaceInvalid
 	}
-	switch settings.Source {
+	if !configSlugPattern.MatchString(target.Environment) {
+		return ErrEnvironmentInvalid
+	}
+	switch target.Source {
 	case SourceDatabase:
+		if databaseLoader == nil {
+			return ErrDatabaseLoader
+		}
 		return nil
 	case SourceHTTP:
-		if settings.HTTP.APIKey == "" {
-			return errors.Join(ErrInvalidSettings, ErrHTTPAPIKeyRequired)
-		}
-		if settings.HTTP.Timeout <= 0 || settings.HTTP.Timeout > maxHTTPTimeout {
-			return errors.Join(ErrInvalidSettings, ErrHTTPTimeoutInvalid)
-		}
-		baseURL, err := url.Parse(settings.HTTP.BaseURL)
-		if err != nil || baseURL.Host == "" || baseURL.User != nil ||
-			(baseURL.Scheme != "http" && baseURL.Scheme != "https") ||
-			baseURL.RawQuery != "" || baseURL.Fragment != "" {
-			return errors.Join(ErrInvalidSettings, ErrHTTPBaseURLInvalid)
-		}
-		return nil
+		return validateHTTPSettings(target.HTTP)
 	default:
 		return ErrUnsupportedSource
+	}
+}
+
+func validateHTTPSettings(settings HTTPSettings) error {
+	if settings.APIKey == "" {
+		return ErrHTTPAPIKeyRequired
+	}
+	if settings.Timeout <= 0 || settings.Timeout > maxHTTPTimeout {
+		return ErrHTTPTimeoutInvalid
+	}
+	baseURL, err := url.Parse(settings.BaseURL)
+	if err != nil || baseURL.Host == "" || baseURL.User != nil ||
+		(baseURL.Scheme != "http" && baseURL.Scheme != "https") ||
+		baseURL.RawQuery != "" || baseURL.Fragment != "" {
+		return ErrHTTPBaseURLInvalid
+	}
+	return nil
+}
+
+func targetIdentity(target Target) string {
+	identity := string(target.Source) + "\x00" + target.Namespace + "\x00" + target.Environment
+	if target.Source == SourceHTTP {
+		identity += "\x00" + target.HTTP.BaseURL
+	}
+	return identity
+}
+
+func newTargetError(err error, target Target, index int) *TargetError {
+	return &TargetError{
+		Err: err, Source: target.Source, Namespace: target.Namespace, Environment: target.Environment, Index: index,
+	}
+}
+
+// UsesSource reports whether the target list contains the requested source.
+func UsesSource(settings Settings, source Source) bool {
+	settings = normalizeSettings(settings)
+	for _, target := range settings.Targets {
+		if target.Source == source {
+			return true
+		}
+	}
+	return false
+}
+
+func loadTarget(ctx context.Context, target Target, databaseLoader DatabaseLoader) (*Result, error) {
+	switch target.Source {
+	case SourceDatabase:
+		return databaseLoader(ctx, target.Namespace, target.Environment)
+	case SourceHTTP:
+		return loadHTTP(ctx, newHTTPClient(target.HTTP), target.HTTP.BaseURL, target)
+	default:
+		return nil, ErrUnsupportedSource
 	}
 }
 
@@ -156,27 +246,30 @@ type httpResponseData struct {
 	Version uint64         `json:"version"`
 }
 
-func loadHTTP(ctx context.Context, settings Settings) (*Result, error) {
+func newHTTPClient(settings HTTPSettings) *resty.Client {
+	return resty.New().
+		SetTimeout(settings.Timeout).
+		SetResponseBodyLimit(maxHTTPBody).
+		SetRedirectPolicy(resty.NoRedirectPolicy()).
+		SetCloseConnection(true).
+		SetJSONUnmarshaler(unmarshalJSONNumber)
+}
+
+func loadHTTP(ctx context.Context, client *resty.Client, baseURL string, target Target) (*Result, error) {
 	endpoint, err := url.JoinPath(
-		settings.HTTP.BaseURL,
+		baseURL,
 		"config-center/api/runtime",
-		settings.Namespace,
-		settings.Environment,
+		target.Namespace,
+		target.Environment,
 	)
 	if err != nil {
 		return nil, errors.Join(ErrHTTP, err)
 	}
 	envelope := &httpEnvelope{}
-	client := resty.New().
-		SetTimeout(settings.HTTP.Timeout).
-		SetResponseBodyLimit(maxHTTPBody).
-		SetRedirectPolicy(resty.NoRedirectPolicy()).
-		SetCloseConnection(true).
-		SetJSONUnmarshaler(unmarshalJSONNumber)
 	response, err := client.R().
 		SetContext(ctx).
 		SetHeader("Accept", "application/json").
-		SetHeader("X-API-Key", settings.HTTP.APIKey).
+		SetHeader("X-API-Key", target.HTTP.APIKey).
 		SetQueryParam("format", "json").
 		SetResult(envelope).
 		Get(endpoint)

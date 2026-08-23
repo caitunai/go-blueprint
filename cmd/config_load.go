@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 const defaultConfigLoadHTTPTimeout = 5 * time.Second
 
 var (
-	ErrPublishedConfigLoad  = errors.New("published configuration bootstrap failed")
-	ErrPublishedConfigMerge = errors.New("merge published configuration into Viper failed")
-	ErrPublishedConfigDB    = errors.New("load published configuration from database failed")
-	protectedBootstrapRoots = map[string]struct{}{
+	ErrPublishedConfigLoad     = errors.New("published configuration bootstrap failed")
+	ErrPublishedConfigSettings = errors.New("read published configuration loader settings failed")
+	ErrPublishedConfigMerge    = errors.New("merge published configuration into Viper failed")
+	ErrPublishedConfigDB       = errors.New("load published configuration from database failed")
+	protectedBootstrapRoots    = map[string]struct{}{
 		"configcenter": {},
 		"configcrypt":  {},
 		"configload":   {},
@@ -26,39 +28,47 @@ var (
 	}
 )
 
-func loadPublishedConfiguration(ctx context.Context) error {
-	if !viper.GetBool("configload.enabled") {
-		return nil
-	}
-	timeout := viper.GetDuration("configload.http.timeout")
-	if timeout == 0 {
-		timeout = defaultConfigLoadHTTPTimeout
-	}
-	settings := configload.Settings{
-		Enabled:     true,
-		Source:      configload.Source(viper.GetString("configload.source")),
-		Namespace:   viper.GetString("configload.namespace"),
-		Environment: viper.GetString("configload.environment"),
-		HTTP: configload.HTTPSettings{
-			BaseURL: viper.GetString("configload.http.baseURL"),
-			APIKey:  viper.GetString("configload.http.apiKey"),
-			Timeout: timeout,
-		},
-	}
-	result, err := configload.Load(ctx, settings, loadPublishedConfigurationFromDatabase)
+func loadPublishedConfiguration(ctx context.Context, settings configload.Settings) error {
+	results, err := configload.LoadAll(ctx, settings, loadPublishedConfigurationFromDatabase)
 	if err != nil {
 		return errors.Join(ErrPublishedConfigLoad, err)
 	}
-	if err := mergePublishedConfiguration(viper.GetViper(), result.Config); err != nil {
+	if err := mergePublishedConfigurationResults(viper.GetViper(), results); err != nil {
 		return errors.Join(ErrPublishedConfigLoad, err)
 	}
-	log.Info().
-		Str("source", string(result.Source)).
-		Str("namespace", result.Namespace).
-		Str("environment", result.Environment).
-		Uint64("version", result.Version).
-		Msg("published configuration loaded")
+	for index, result := range results {
+		log.Info().
+			Int("target_index", index+1).
+			Int("target_count", len(results)).
+			Str("source", string(result.Source)).
+			Str("namespace", result.Namespace).
+			Str("environment", result.Environment).
+			Uint64("version", result.Version).
+			Msg("published configuration loaded")
+	}
 	return nil
+}
+
+func publishedConfigLoadSettings(config *viper.Viper) (configload.Settings, error) {
+	targets := make([]configload.Target, 0)
+	if err := config.UnmarshalKey("configload.targets", &targets); err != nil {
+		return configload.Settings{}, errors.Join(ErrPublishedConfigSettings, err)
+	}
+	for index := range targets {
+		if !strings.EqualFold(strings.TrimSpace(string(targets[index].Source)), string(configload.SourceHTTP)) {
+			continue
+		}
+		if targets[index].HTTP.Timeout == 0 {
+			targets[index].HTTP.Timeout = defaultConfigLoadHTTPTimeout
+		}
+		apiKeyEnv := strings.TrimSpace(targets[index].HTTP.APIKeyEnv)
+		if apiKeyEnv != "" {
+			targets[index].HTTP.APIKey = os.Getenv(apiKeyEnv)
+		}
+	}
+	return configload.Settings{
+		Targets: targets,
+	}, nil
 }
 
 func loadPublishedConfigurationFromDatabase(
@@ -88,6 +98,16 @@ func mergePublishedConfiguration(target *viper.Viper, config map[string]any) err
 		return errors.Join(ErrPublishedConfigMerge, err)
 	}
 	return nil
+}
+
+func mergePublishedConfigurationResults(target *viper.Viper, results []configload.Result) error {
+	staged := viper.New()
+	for _, result := range results {
+		if err := mergePublishedConfiguration(staged, result.Config); err != nil {
+			return err
+		}
+	}
+	return mergePublishedConfiguration(target, staged.AllSettings())
 }
 
 func clonePublishedConfigValue(value any) any {

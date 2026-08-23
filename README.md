@@ -197,52 +197,72 @@ sensitive values.
 
 ### Loading published configuration into Viper
 
-The application can merge the latest published configuration for one
-environment into Viper from the root command before any child command runs.
-This makes the same configuration available to `serve`, `queue`, migration,
-and other commands. `.app.toml` remains the bootstrap source and selects either
-a trusted direct database read or the runtime HTTP API. Draft configuration is
-never loaded. With the database source, `config-key generate` intentionally
-skips remote loading because it may be creating the first keyring required to
-decrypt that source; the HTTP source remains available to the command.
+The application can merge the latest published configurations for an ordered
+list of namespace/environment targets into Viper from the root command before
+any child command runs. This makes the same configuration available to
+`serve`, `queue`, migration, and other commands. Targets are loaded and merged
+in declaration order, so a later target overrides matching values from earlier
+targets while retaining unrelated values. This supports layers such as shared
+defaults, service settings, and deployment-specific overrides.
 
-For a direct database read, configure the loader together with the existing
-`[db]` settings:
+`.app.toml` remains the bootstrap source, while every target independently
+selects a trusted direct database read or an HTTP runtime API. Draft
+configuration is never loaded. A single load can therefore combine local
+database configuration with configuration from multiple independent servers.
+
+The following example loads shared defaults from the local database and then
+applies overrides from two different configuration-center servers:
 
 ```toml
 [configload]
 enabled=true
+
+[[configload.targets]]
 source="database"
-namespace="my-service"
-environment="production"
-```
+namespace="shared"
+environment="base"
 
-Database loading uses the local `[db]` connection and does not require the
-namespace API Key because it is an in-process trusted database operation. If
-the published snapshot is encrypted, the local `[configcrypt]` keyring must
-also contain the key needed to decrypt it.
-
-For HTTP loading, configure the configuration-center origin and namespace API
-Key:
-
-```toml
-[configload]
-enabled=true
+[[configload.targets]]
 source="http"
 namespace="my-service"
 environment="production"
 
-[configload.http]
-baseURL="https://config.example.com"
-apiKey="replace-with-the-namespace-api-key"
+[configload.targets.http]
+baseURL="https://primary-config.example.com"
+apiKeyEnv="PRIMARY_CONFIG_API_KEY"
 timeout="5s"
+
+[[configload.targets]]
+source="http"
+namespace="regional-service"
+environment="production"
+
+[configload.targets.http]
+baseURL="https://regional-config.example.com"
+apiKeyEnv="REGIONAL_CONFIG_API_KEY"
+timeout="8s"
 ```
 
-The HTTP timeout must be greater than zero and at most one minute. Redirects
-are rejected so the API Key cannot be forwarded to another origin, and the
-response body is limited to 2 MiB. Prefer supplying the API Key through the
-`CONFIGLOAD_HTTP_APIKEY` environment variable instead of committing it to a
-configuration file.
+Set `PRIMARY_CONFIG_API_KEY` and `REGIONAL_CONFIG_API_KEY` in the process
+environment before startup. `apiKeyEnv` names the environment variable; its
+value is read into memory and is never included in errors or logs. This allows
+targets using the same namespace on different servers to use different API
+Keys without storing plaintext credentials in `.app.toml`.
+
+Database targets use the local `[db]` connection and do not require a namespace
+API Key. If a database snapshot is encrypted, the local `[configcrypt]` keyring
+must contain the required key. `config-key generate` skips the complete target
+list when it contains any database target, because applying only the HTTP
+portion would violate atomic ordered loading while the command may still be
+bootstrapping the first local keyring.
+
+Every target must explicitly define `source`, `namespace`, and `environment`.
+HTTP targets must additionally define their own `http.baseURL` and
+`http.apiKeyEnv`. The per-target HTTP timeout defaults to five seconds when
+omitted, and otherwise must be greater than zero and at most one minute.
+Redirects are rejected so API Keys cannot be forwarded to another origin, and
+every response body is limited to 2 MiB. Global source, HTTP, namespace, and
+environment fallback settings are not supported.
 
 Published values override ordinary `.app.toml` values, while Viper environment
 variables retain their higher precedence. The bootstrap roots `db`,
@@ -250,8 +270,9 @@ variables retain their higher precedence. The bootstrap roots `db`,
 published payload, preventing a remote configuration from changing its own
 loader, database connection, keyring, or configuration-center authentication.
 Redis, queue, logger, server, and other application settings are initialized
-after the published configuration is merged. Loading errors stop startup rather
-than silently falling back to stale local values.
+after all published configurations are merged. Every target is fetched before
+Viper is changed; a missing, invalid, duplicate, or failed target stops startup
+without applying only part of the configured target list.
 
 For Vite hot reload, set `ui.assetMode="vite"`, run `npm run dev` in
 `storage/ui`, and keep `ui.viteDevOrigin` aligned with the Vite origin. Release

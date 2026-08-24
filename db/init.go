@@ -2,8 +2,10 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -12,11 +14,19 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-var db *gorm.DB
+var (
+	db                 *gorm.DB
+	dbMutex            sync.Mutex
+	ErrCloseConnection = errors.New("close database connection failed")
+)
 
 func Conn() *gorm.DB {
+	dbMutex.Lock()
+
 	if db != nil {
-		return db
+		database := db
+		dbMutex.Unlock()
+		return database
 	}
 	// refer https://github.com/go-sql-driver/mysql#dsn-data-source-name for details
 	user := viper.GetString("db.username")
@@ -26,7 +36,9 @@ func Conn() *gorm.DB {
 	port := viper.GetString("db.port")
 	tls := viper.GetBool("db.tls")
 	if user == "" || pass == "" || dbname == "" || host == "" || port == "" {
+		dbMutex.Unlock()
 		log.Fatal().Msg("mysql db config should not empty")
+		return nil
 	}
 	dsn := "%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC"
 	if tls {
@@ -46,14 +58,39 @@ func Conn() *gorm.DB {
 		},
 	})
 	if err != nil {
+		dbMutex.Unlock()
 		log.Fatal().Err(err).Send()
+		return nil
 	}
 	migrateDB()
-	return db
+	database := db
+	dbMutex.Unlock()
+	return database
 }
 
 func DB() *gorm.DB {
 	return Conn()
+}
+
+// Close disconnects every connection in the underlying database pool.
+// Callers must stop database users before closing the shared pool.
+func Close() error {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	if db == nil {
+		return nil
+	}
+	database := db
+	db = nil
+	sqlDB, err := database.DB()
+	if err != nil {
+		return errors.Join(ErrCloseConnection, err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		return errors.Join(ErrCloseConnection, err)
+	}
+	return nil
 }
 
 func migrateDB() {

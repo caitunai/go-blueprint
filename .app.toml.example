@@ -30,6 +30,7 @@ prefix="app"
 [queue]
 prefix="test"
 topics=["default"]
+shutdownTimeout="5s"
 
 [queue.consumer]
 name="default"

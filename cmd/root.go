@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/queue"
+	"github.com/caitunai/go-blueprint/redis"
 	"github.com/caitunai/go-blueprint/services/configload"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -14,7 +16,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile                      string
+	ErrCloseApplicationResources = errors.New("close application resources failed")
+	ErrExecuteApplicationCommand = errors.New("execute application command failed")
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -30,10 +36,36 @@ var rootCmd = &cobra.Command{
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func execute() (returnErr error) {
+	defer func() {
+		closeErr := closeApplicationResources()
+		if closeErr == nil {
+			return
+		}
+		log.Error().Err(closeErr).Msg("close application resources failed")
+		returnErr = errors.Join(returnErr, closeErr)
+	}()
+
+	if err := rootCmd.Execute(); err != nil {
+		return errors.Join(ErrExecuteApplicationCommand, err)
+	}
+	return nil
+}
+
+func closeApplicationResources() error {
+	queueErr := queue.Close()
+	redisErr := redis.Close()
+	databaseErr := db.Close()
+	closeErr := errors.Join(queueErr, redisErr, databaseErr)
+	if closeErr != nil {
+		return errors.Join(ErrCloseApplicationResources, closeErr)
+	}
+	return nil
 }
 
 func init() {

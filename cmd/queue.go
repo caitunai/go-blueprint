@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/rs/zerolog/log"
 
@@ -9,22 +11,25 @@ import (
 
 var subscriberID string
 
+var ErrQueueCommand = errors.New("run queue command failed")
+
 // queueCmd represents the queue command
 var queueCmd = &cobra.Command{
 	Use:   "queue",
 	Short: "A command of queue listener to process jobs",
 	Long:  "Start this command to process jobs in the queues.",
-	Run: func(cmd *cobra.Command, _ []string) {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		err := queue.Init()
 		if err != nil {
 			log.Error().Err(err).Msg("init queue publisher failed with error")
-			return
+			return errors.Join(ErrQueueCommand, err)
 		}
 		err = queue.Start(cmd.Context(), subscriberID)
 		if err != nil {
 			log.Error().Err(err).Msg("start queue processes failed with error")
-			return
+			return errors.Join(ErrQueueCommand, err)
 		}
+		return nil
 	},
 }
 

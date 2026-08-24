@@ -78,6 +78,9 @@ Do not allow a best-effort follow-up operation, such as prefetching the next res
 - Return the data needed by the post-transaction stage from the transaction function. Do not re-read the same rows solely to reconstruct context already available in memory.
 - Inspect generated SQL and query plans for performance-sensitive GORM code. Verify index selectivity, rows examined, result cardinality, and that batch size remains below database parameter and packet limits.
 - Keep transactions free of Redis, queue publication without a transactional outbox, and third-party HTTP calls. Never treat independent MySQL and Redis writes as a distributed transaction.
+- Give every transaction a context deadline and a single explicit commit-or-rollback owner. Register a rollback immediately after beginning a manual transaction so every error, panic, cancellation, and early return releases the connection and its locks; a rollback after a successful commit may be treated as a harmless no-op. Close query rows promptly and never leak a transaction-scoped GORM handle outside its lifecycle.
+- Every long-running command that initializes GORM must participate in graceful shutdown. After stopping new HTTP requests and job claims and completing or cancelling in-flight work within a bounded deadline, obtain the underlying `*sql.DB` and call `Close()` so pooled database sessions and any remaining transactions are actively disconnected. Close the database only after components that use it have stopped.
+- Do not rely on graceful cleanup as the only lock-release mechanism: cleanup cannot run after `SIGKILL`, a runtime crash, or host/network failure. Configure bounded query and transaction timeouts, connection lifetime and idle limits, TCP/server-side dead-session detection where operationally available, and monitoring for long-running transactions and lock waits so MySQL eventually detects failed clients and releases their sessions.
 
 ## Redis and cache guidance
 
@@ -108,6 +111,7 @@ Do not allow a best-effort follow-up operation, such as prefetching the next res
 - Ensure goroutines, timers, tickers, response bodies, streams, and channels have explicit ownership and cleanup. Avoid background goroutines launched from handlers unless the work has durable ownership, observability, cancellation, and shutdown semantics.
 - Apply backpressure instead of allowing queues, channels, batches, or memory buffers to grow without limit. Reject, shed, or defer load using an explicit product policy when capacity is exhausted.
 - Reuse clients and connection pools; do not construct database, Redis, or HTTP clients per request. Configure pool sizes, timeouts, idle limits, and response-size limits from configuration and validate them against expected concurrency.
+- Handle `SIGINT` and `SIGTERM` through one idempotent shutdown coordinator. Stop ingress and work acquisition first, cancel root contexts, drain in-flight work with a configured deadline, then close shared resources in dependency order: queue publishers/subscribers and workers, Redis clients, the underlying database connection pool, and other transports. Log shutdown timeout or close failures without exposing credentials.
 
 ## Verification and completion criteria
 

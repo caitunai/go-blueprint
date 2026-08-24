@@ -33,6 +33,94 @@ Always use the latest stable version of Go (1.23 or 1.24 or newer) and be famili
 
 Always prioritize security, scalability, and maintainability in your API designs and implementations. Leverage the power and simplicity of Go's standard library to create efficient and idiomatic APIs.
 
+# Performance Optimization Methodology
+
+Performance work must optimize the complete request and background-processing lifecycle, not merely the execution time of an individual SQL statement or Redis command. Reduce synchronous steps, network round trips, transaction duration, lock hold time, duplicated work, and unbounded background work while preserving business correctness.
+
+## Performance analysis and planning
+
+Before changing an implementation, describe the current and proposed data flow in pseudocode and identify the authoritative data source, consistency boundaries, failure semantics, and required ordering. Use the following workflow:
+
+1. Draw the real synchronous request path and every asynchronous continuation, including MySQL, Redis, queue, filesystem, and third-party calls.
+2. Establish a reproducible baseline with realistic data volume, key distribution, concurrency, and hot-key behavior. Record throughput and latency percentiles, especially P50, P95, and P99; averages alone are insufficient.
+3. Measure these costs separately:
+   - Network round trips to MySQL, Redis, and external services.
+   - Server-side work such as SQL statement count, rows examined, Redis command count, Lua execution time, scans, sorts, allocations, and serialization.
+   - Waiting and saturation such as row-lock time, transaction duration, connection-pool waits, goroutine growth, queue lag, hot keys, and Redis single-thread blocking.
+4. Define invariants that the optimization must preserve, including idempotency, uniqueness, authorization, state transitions, ordering, and read-after-write requirements.
+5. Set a measurable target and a rollback criterion before implementation. Compare before and after using the same workload and verify that work was removed rather than merely moved to an unobserved component.
+
+Pipeline, Lua, batch SQL, caching, and concurrency solve different costs. A Redis Pipeline reduces network round trips but does not remove Redis command execution. Lua can provide atomicity but blocks Redis while running. Parallel calls can reduce wall-clock latency but increase downstream load. Always state which measured cost a proposed change addresses.
+
+## Optimization order for request paths
+
+Apply optimizations in this order unless measurements justify a different choice:
+
+1. Remove duplicate reads, writes, serialization, and repeated configuration parsing.
+2. Reuse data already loaded in a transaction or earlier stage by returning a focused result context instead of querying it again.
+3. Batch independent reads and same-table writes with bounded request and payload sizes.
+4. Shorten transactions and lock scopes; move preparation before the transaction and non-authoritative work after commit.
+5. Replace read-then-lock-then-insert flows with atomic conditional writes when the operation only validates existing state and does not modify the validated rows.
+6. Move retryable cache, index, notification, and projection work out of the authoritative transaction through a durable asynchronous boundary when eventual consistency is acceptable.
+7. Move capacity maintenance and historical cleanup out of hot request paths into bounded periodic jobs.
+8. Add bounded precomputation only when repeated requests can safely reuse the work; never create authoritative records, exposure counts, reservations, or cooldowns until the result is actually committed or returned.
+9. Change consistency guarantees or business algorithms only after the preceding steps are exhausted and the tradeoff is explicitly approved.
+
+Do not allow a best-effort follow-up operation, such as prefetching the next result, to turn an already committed authoritative operation into an apparent client failure. Return the committed outcome and report or retry the follow-up separately.
+
+## MySQL, GORM, and transaction guidance
+
+- Keep authoritative validation and writes in MySQL. Redis may perform bounded candidate selection or coarse filtering, but MySQL must enforce final business constraints when Redis data may be stale or incomplete.
+- Prefer one set-based query over N per-record queries. Collect identifiers, deduplicate them, use bounded `IN` queries or joins, and batch inserts or updates when this reduces measured round trips and database work.
+- Use conditional `INSERT`, `UPDATE`, or compare-and-swap predicates for atomic state transitions. Treat zero affected rows as a classified conflict or stale-candidate result rather than issuing a separate preflight query when possible.
+- Do not remove locks that protect updates derived from existing values. For multi-row locking, determine and document a stable application-level lock order, acquire locks consistently, and do not assume an `IN` query's result ordering guarantees the physical lock acquisition order under every execution plan.
+- Minimize work while locks are held. Perform validation and non-locking reads before the lock when safe, combine writes inside the critical section, and defer cache or external-system work until after commit.
+- Return the data needed by the post-transaction stage from the transaction function. Do not re-read the same rows solely to reconstruct context already available in memory.
+- Inspect generated SQL and query plans for performance-sensitive GORM code. Verify index selectivity, rows examined, result cardinality, and that batch size remains below database parameter and packet limits.
+- Keep transactions free of Redis, queue publication without a transactional outbox, and third-party HTTP calls. Never treat independent MySQL and Redis writes as a distributed transaction.
+
+## Redis and cache guidance
+
+- Use the `/cache` package for ordinary caching and `/redis` wrappers for specialized Redis operations; feature packages must continue to avoid direct `go-redis` usage.
+- Use Pipeline for bounded independent operations when the goal is fewer network round trips. Use Lua only when related operations require Redis-side atomicity, such as idempotency, compare-and-swap, leases, or conditional compensation.
+- Keep each Lua script small and predictably bounded. Never put an unbounded scan, a large collection of unrelated objects, or a whole worker batch into one script; split work into fixed-size batches and Pipeline independent per-object scripts when appropriate.
+- Every cache or Redis structure must define capacity, TTL or retention, ownership of cleanup, cleanup frequency, and maximum cleanup batch size. "Clean it up later" is not a capacity plan.
+- Cache only data whose cardinality and staleness are bounded. Provide TTL, capacity, active invalidation where required, empty-result behavior, and a reliable source-of-truth fallback. Do not cache complete historical relationships or metadata whose memory grows approximately with business history without a measured retention design.
+- Distinguish correctness cleanup from capacity cleanup. Removal whose delay can affect authorization, eligibility, reservations, routing, or valid requests must occur synchronously or atomically. Expired indexes, excess low-value entries, and historical redundancy may be removed asynchronously in bounded batches.
+- Avoid hot-key concentration and oversized values. Measure key cardinality, value size, command complexity, and contention under realistic skew, not only uniform benchmarks.
+
+## Durable asynchronous work and workers
+
+- When a database commit must reliably cause a Redis projection, index update, notification, or queue event, use a transactional outbox written in the same MySQL transaction. A worker may then retry the non-authoritative projection without losing the committed business change.
+- Design every job for at-least-once delivery. Use idempotency keys, unique constraints, monotonic versions, compare-and-swap tokens, or equivalent guards so replay and out-of-order delivery are safe.
+- For versioned projections, ignore an event whose version is not newer than the stored projection. Include enough state in the event or provide a safe source-of-truth reload path for recovery.
+- Claim work in bounded batches using a lease or token. Prefer a set-based claim/update pattern such as `FOR UPDATE SKIP LOCKED` plus one bounded update over one claim update per row when supported by the existing database design.
+- Batch-load shared context once per worker batch, deduplicate identifiers, and parse shared configuration once. Do not issue the same tenant, namespace, permission, or configuration query for every event.
+- Optimize the success path with batch acknowledgement, but preserve per-item attempt counts, errors, backoff, and dead-letter behavior for failures. One poison event must not indefinitely block unrelated successful events.
+- Define queue-depth limits, batch sizes, lease duration, retry limit, exponential backoff with jitter, processed-event retention, dead-letter handling, and shutdown behavior. Monitor queue lag, oldest-event age, retry rate, lease recovery, and dead-letter volume.
+- Run periodic cleanup with an explicit batch size and time budget so recovery from a backlog cannot monopolize MySQL or Redis.
+
+## Go concurrency and resource bounds
+
+- Propagate `context.Context` deadlines and cancellation through handlers, database calls, Redis wrappers, Resty requests, and jobs. Stop downstream work when the caller or worker lease is no longer valid unless durable completion is explicitly required.
+- Use concurrency only for independent operations. Bound it with a worker pool or semaphore sized against downstream connection pools and service limits; never start one unbounded goroutine per record or request item.
+- Do not hold database connections, row locks, mutexes, or large buffers while waiting for unrelated network calls.
+- Ensure goroutines, timers, tickers, response bodies, streams, and channels have explicit ownership and cleanup. Avoid background goroutines launched from handlers unless the work has durable ownership, observability, cancellation, and shutdown semantics.
+- Apply backpressure instead of allowing queues, channels, batches, or memory buffers to grow without limit. Reject, shed, or defer load using an explicit product policy when capacity is exhausted.
+- Reuse clients and connection pools; do not construct database, Redis, or HTTP clients per request. Configure pool sizes, timeouts, idle limits, and response-size limits from configuration and validate them against expected concurrency.
+
+## Verification and completion criteria
+
+An optimization is complete only after correctness and performance are both demonstrated:
+
+- Add or update unit, integration, and concurrency tests for invariants, stale candidates, duplicate submissions, replay, out-of-order events, partial failure, lease expiry, and cancellation as applicable.
+- Run race detection and the existing lint/test suite. Use focused benchmarks and load tests for the changed hot path, with realistic data cardinality and contention.
+- Compare before/after SQL count, Redis round trips and internal commands, rows examined, allocations, transaction and lock duration, pool waits, queue lag, throughput, error rate, and P50/P95/P99 latency.
+- Test dependency slowdown and failure. Confirm timeouts, rollback behavior, idempotent retry, backpressure, and recovery without data loss or an unbounded retry storm.
+- Document important consistency changes, capacity formulas, batch-size rationale, operational metrics, and rollback conditions near the relevant package or configuration.
+
+Avoid these common mistakes: optimizing only averages; equating fewer RTTs with less server work; deleting correctness locks; copying all authoritative data into Redis; adding caches without bounds or invalidation; cleaning unbounded data in request paths; using giant Lua scripts; launching unbounded goroutines; adding retries without idempotency and jitter; and declaring success without production-representative P95/P99 evidence.
+
 # Architecture description of this project
 
 This project supports Go modules, and the module information is defined in the `/go.mod` file.

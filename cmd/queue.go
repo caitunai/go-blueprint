@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/caitunai/go-blueprint/queue"
+	"github.com/caitunai/go-blueprint/redis"
 	"github.com/rs/zerolog/log"
 
 	"github.com/spf13/cobra"
@@ -19,7 +20,12 @@ var queueCmd = &cobra.Command{
 	Short: "A command of queue listener to process jobs",
 	Long:  "Start this command to process jobs in the queues.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		err := queue.Init()
+		err := redis.Init(cmd.Context())
+		if err != nil {
+			log.Error().Err(err).Msg("connect redis failed")
+			return errors.Join(ErrQueueCommand, err)
+		}
+		err = queue.Init()
 		if err != nil {
 			log.Error().Err(err).Msg("init queue publisher failed with error")
 			return errors.Join(ErrQueueCommand, err)

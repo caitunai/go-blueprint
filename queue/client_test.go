@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestCloseWatermillClientsKeepsSharedRedisOwnedByRedisPackage(t *testing.T) 
 	if err := redis.Close(); err != nil {
 		t.Fatalf("redis.Close() error = %v", err)
 	}
-	if err := Publish(&job.Example{}); !errors.Is(err, ErrPublisherNotReady) {
+	if err := Publish(context.Background(), &job.Example{}); !errors.Is(err, ErrPublisherNotReady) {
 		t.Fatalf("Publish() error = %v, want ErrPublisherNotReady", err)
 	}
 }

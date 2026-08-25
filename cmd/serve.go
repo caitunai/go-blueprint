@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/caitunai/go-blueprint/api/server"
 	"github.com/caitunai/go-blueprint/cache"
 	"github.com/caitunai/go-blueprint/queue"
@@ -9,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+var ErrServeCommand = errors.New("run serve command failed")
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
@@ -21,8 +25,10 @@ var serveCmd = &cobra.Command{
 		}
 		return nil
 	},
-	Run: func(cmd *cobra.Command, _ []string) {
-		redis.Init()
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := redis.Init(cmd.Context()); err != nil {
+			return errors.Join(ErrServeCommand, err)
+		}
 		cache.InitCache()
 		err := queue.Init()
 		if err != nil {
@@ -32,9 +38,11 @@ var serveCmd = &cobra.Command{
 				Str("package", "cmd").
 				Str("command", "serve").
 				Msg("init the queue publisher failed")
+			return errors.Join(ErrServeCommand, err)
 		}
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
 		s.Start(cmd.Context())
+		return nil
 	},
 }
 

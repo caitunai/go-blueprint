@@ -22,19 +22,51 @@ prefix=""
 
 [redis]
 host="127.0.0.1"
+username=""
 password=""
 port="6379"
 db=0
 prefix="app"
+pingTimeout="3s"
+dialTimeout="3s"
+readTimeout="3s"
+writeTimeout="3s"
+poolTimeout="4s"
+poolSize=0
+minIdleConnections=2
+maxIdleConnections=0
+connectionMaxIdleTime="5m"
+connectionMaxLifetime="30m"
+
+[redis.tls]
+enabled=false
+serverName=""
 
 [queue]
 prefix="test"
 topics=["default"]
 shutdownTimeout="5s"
+streamMaxLength=100000
+# Approximate retention: size for worst-case lag because trimming can evict old pending entries.
+maxRetries=3
+retryInitialInterval="250ms"
+retryMaxInterval="2s"
+deadLetterSuffix="dead-letter"
+deadLetterMaxLength=10000
 
 [queue.consumer]
 name="default"
 group="default"
+# Increase only when jobs are independent and do not require strict ordering.
+concurrency=1
+nackResendInterval="1s"
+blockTime="1s"
+claimInterval="30s"
+claimBatchSize=100
+# Must exceed the longest expected job execution, including in-process retries.
+maxIdleTime="5m"
+checkConsumersInterval="1m"
+consumerTimeout="5m"
 
 [oauth]
 key="oauth_app_id_or_key"

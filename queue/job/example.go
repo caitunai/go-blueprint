@@ -3,10 +3,17 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	ErrEncodeExample = errors.New("encode example job failed")
+	ErrDecodeExample = errors.New("decode example job failed")
+	ErrRunExample    = errors.New("run example job failed")
 )
 
 type Example struct {
@@ -21,25 +28,30 @@ func (e *Example) GetJobTopic() string {
 	return "default"
 }
 
-func (e *Example) GetJobData() message.Payload {
+func (e *Example) GetJobData() (message.Payload, error) {
 	data, err := json.Marshal(e)
 	if err != nil {
-		return []byte("")
+		return nil, errors.Join(ErrEncodeExample, err)
 	}
-	return data
+	return data, nil
 }
 
-func (e *Example) ParseJob(data message.Payload) Job {
+func (e *Example) ParseJob(data message.Payload) (Job, error) {
 	n := &Example{}
-	err := json.Unmarshal(data, n)
-	if err != nil {
-		log.Error().Err(err).Bytes("data", data).Msg("parse example job data failed")
+	if err := json.Unmarshal(data, n); err != nil {
+		return nil, errors.Join(ErrDecodeExample, ErrPermanent, err)
 	}
-	return n
+	return n, nil
 }
 
 func (e *Example) RunJob(ctx context.Context) error {
-	time.Sleep(time.Second)
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.Join(ErrRunExample, ctx.Err())
+	case <-timer.C:
+	}
 	log.Ctx(ctx).Debug().Int("num", e.Number).Msg("run example job")
 	return nil
 }

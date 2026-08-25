@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/caitunai/go-blueprint/cache"
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
@@ -59,6 +60,7 @@ func execute() (returnErr error) {
 
 func closeApplicationResources() error {
 	queueErr := queue.Close()
+	cache.Close()
 	redisErr := redis.Close()
 	databaseErr := db.Close()
 	closeErr := errors.Join(queueErr, redisErr, databaseErr)

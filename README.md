@@ -12,11 +12,9 @@ go install golang.org/x/tools/cmd/gonew@latest
 ```
 
 ## ⚠️ Update the hardcode
-> ⚠️ You need to edit the `.golangci.yaml` file for `depguard` settings.
->
-> ⚠️ Remember to replace the go module name in this `.golangci.yaml`:
->
-> Replace [github.com/caitunai/go-blueprint](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml#L93) to `github.com/yourname/project`.
+> ⚠️ Replace every occurrence of `github.com/caitunai/go-blueprint` in
+> [`.golangci.yaml`](https://github.com/caitunai/go-blueprint/blob/main/.golangci.yaml)
+> with the new module path. This keeps both `depguard` and the Go formatters aligned with `go.mod`.
 
 ## Develop and Run
 install air
@@ -39,19 +37,22 @@ lint the code
 golangci-lint run
 ```
 
-If it has some issues, try auto fix
+Apply the configured formatters and safe automatic fixes:
 
 ```shell
+golangci-lint fmt
 golangci-lint run --fix
 ```
 
-If it has issues about struct alignment, try this command to fix
+The `fieldalignment` analyzer is enforced to reduce structure padding. Review field-order-sensitive
+serialization, reflection, ORM, and tests before applying its fixes:
 
 ```shell
 fieldalignment -fix ./path/to/package
 ```
 
-If the `fieldalignment` command not found, you can install it with this command:
+Install the analyzer when it is not already available:
+
 ```shell
 go install golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment@latest
 ```

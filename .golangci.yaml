@@ -1,45 +1,107 @@
 version: "2"
+
 run:
-  concurrency: 1
+  concurrency: 0
   issues-exit-code: 1
   tests: true
+  timeout: 5m
+  modules-download-mode: readonly
+
 linters:
+  # Keep the list explicit so golangci-lint upgrades cannot silently change policy.
   default: none
   enable:
-    - bidichk
+    # Correctness, error handling, and resource lifetime.
     - bodyclose
-    - containedctx
     - contextcheck
-    - depguard
-    - dupl
+    - durationcheck
+    - err113
     - errcheck
     - errchkjson
     - errname
     - errorlint
-    - forbidigo
-    - goconst
-    - gocritic
     - govet
     - ineffassign
     - makezero
-    - nakedret
-    - nolintlint
-    - revive
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - rowserrcheck
+    - sqlclosecheck
     - staticcheck
     - unconvert
     - unused
     - wastedassign
-    - whitespace
     - wrapcheck
+
+    # Security and API boundaries.
+    - asciicheck
+    - bidichk
+    - canonicalheader
+    - containedctx
+    - forcetypeassert
+    - gosec
+    - noctx
+
+    # Maintainability and consistent design.
+    - asasalint
+    - cyclop
+    - depguard
+    - dogsled
+    - dupl
+    - exhaustive
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - godox
+    - interfacebloat
+    - maintidx
+    - musttag
+    - nakedret
+    - nestif
+    - nolintlint
+    - predeclared
+    - recvcheck
+    - revive
+    - thelper
+    - tparallel
+    - unparam
+    - unqueryvet
     - zerologlint
+
+    # Modern Go and standard-library simplifications.
+    - copyloopvar
+    - exptostd
+    - fatcontext
+    - intrange
+    - mirror
+    - modernize
+    - nosprintfhostport
+    - perfsprint
+    - usestdlibvars
+    - usetesting
+
+    # Source and prose hygiene.
+    - dupword
+    - forbidigo
+    - goprintffuncname
+    - misspell
+    - whitespace
+
   settings:
+    cyclop:
+      max-complexity: 15
+      package-average: 10.0
     depguard:
       rules:
         main:
+          list-mode: strict
           files:
             - $all
           allow:
-            - $all
             - $gostd
             - github.com/caitunai/go-blueprint
             - github.com/rs/zerolog
@@ -60,39 +122,82 @@ linters:
             - github.com/joho/godotenv
           deny:
             - pkg: reflect
-              desc: not allowed
+              desc: Prefer type-safe code over reflection.
             - pkg: github.com/pkg/errors
-              desc: Should be replaced by standard lib errors package
+              desc: Use the standard library errors package.
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    funlen:
+      lines: 100
+      statements: 60
+      ignore-comments: true
+    gocognit:
+      min-complexity: 20
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      match-constant: true
+      numbers: true
+      min: 3
+      max: 1000
+      find-duplicates: true
+      eval-const-expressions: true
     govet:
       enable-all: true
       settings:
         shadow:
           strict: true
+    interfacebloat:
+      max: 8
+    maintidx:
+      under: 20
+    nakedret:
+      max-func-lines: 0
+    nestif:
+      min-complexity: 5
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      enable-default-rules: true
+      directives:
+        - name: specify-disable-reason
+          severity: error
+    staticcheck:
+      checks:
+        - all
+
   exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
-    rules:
-      - path: (.+)\.go$
-        text: 'getCSSJsFiles is unused'
-      - path: (.+)\.go$
-        text: 'shadow: declaration of "err" shadows declaration at'
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    generated: strict
+    warn-unused: true
+
 issues:
-  uniq-by-line: true
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+  # Enforce all rules on every changed Go file while legacy debt is retired.
+  new-from-merge-base: main
+  whole-files: true
+
 formatters:
   enable:
-    - gofmt
     - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/caitunai/go-blueprint
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
+    goimports:
+      local-prefixes:
+        - github.com/caitunai/go-blueprint
   exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    generated: strict
+    warn-unused: true

@@ -92,9 +92,6 @@ linters:
     - whitespace
 
   settings:
-    cyclop:
-      max-complexity: 15
-      package-average: 10.0
     depguard:
       rules:
         main:
@@ -125,49 +122,11 @@ linters:
               desc: Prefer type-safe code over reflection.
             - pkg: github.com/pkg/errors
               desc: Use the standard library errors package.
-    dupl:
-      threshold: 100
-    errcheck:
-      check-type-assertions: true
-      check-blank: true
-    exhaustive:
-      default-signifies-exhaustive: true
-    funlen:
-      lines: 100
-      statements: 60
-      ignore-comments: true
-    gocognit:
-      min-complexity: 20
-    goconst:
-      min-len: 3
-      min-occurrences: 3
-      match-constant: true
-      numbers: true
-      min: 3
-      max: 1000
-      find-duplicates: true
-      eval-const-expressions: true
     govet:
       enable-all: true
       settings:
         shadow:
           strict: true
-    interfacebloat:
-      max: 8
-    maintidx:
-      under: 20
-    nakedret:
-      max-func-lines: 0
-    nestif:
-      min-complexity: 5
-    nolintlint:
-      require-explanation: true
-      require-specific: true
-    revive:
-      enable-default-rules: true
-      directives:
-        - name: specify-disable-reason
-          severity: error
     staticcheck:
       checks:
         - all

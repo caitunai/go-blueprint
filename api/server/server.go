@@ -3,11 +3,9 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os/signal"
-	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +21,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/route"
+	"github.com/caitunai/go-blueprint/safe"
 )
 
 // Server represents server data.
@@ -34,6 +33,7 @@ type Server struct {
 const (
 	noHTTPTimeout          time.Duration = 0
 	defaultShutdownTimeout               = 5 * time.Second
+	httpServerTaskName                   = "http_server"
 )
 
 // NewServer creates a new server.
@@ -53,7 +53,9 @@ func (s *Server) Start(ctx context.Context) {
 		IdleTimeout:       configuredDuration("server.idleTimeout", noHTTPTimeout),
 	}
 
-	go serveSafely(srv)
+	startServerTask(ctx, func(context.Context) {
+		serve(srv)
+	})
 
 	shutdownContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -72,18 +74,8 @@ func (s *Server) Start(ctx context.Context) {
 	log.Info().Msg("Server exiting")
 }
 
-func serveSafely(srv *http.Server) {
-	defer recoverServerPanic()
-	serve(srv)
-}
-
-func recoverServerPanic() {
-	if recovered := recover(); recovered != nil {
-		log.Error().
-			Str("reason", fmt.Sprint(recovered)).
-			Bytes("stack", debug.Stack()).
-			Msg("HTTP server goroutine panicked")
-	}
+func startServerTask(ctx context.Context, task safe.Task) {
+	safe.Go(ctx, httpServerTaskName, task)
 }
 
 func (s *Server) newRouter() *gin.Engine {

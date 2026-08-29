@@ -1,6 +1,13 @@
 package server
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/caitunai/go-blueprint/safe"
+)
 
 func TestHTTPTimeoutsDefaultToUnlimited(t *testing.T) {
 	keys := []string{
@@ -16,12 +23,23 @@ func TestHTTPTimeoutsDefaultToUnlimited(t *testing.T) {
 	}
 }
 
-func TestRecoverServerPanic(_ *testing.T) {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer recoverServerPanic()
+func TestServerTaskRecoversPanic(t *testing.T) {
+	panicEvents := make(chan error, 1)
+	unsubscribe := safe.OnPanic(httpServerTaskName, func(_ context.Context, _ string, err error) {
+		panicEvents <- err
+	})
+	t.Cleanup(unsubscribe)
+
+	startServerTask(t.Context(), func(context.Context) {
 		panic("test panic")
-	}()
-	<-done
+	})
+
+	select {
+	case err := <-panicEvents:
+		if !errors.Is(err, safe.ErrPanic) {
+			t.Fatalf("server task error = %v, want safe.ErrPanic", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for server panic recovery")
+	}
 }

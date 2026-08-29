@@ -113,6 +113,7 @@ linters:
             - github.com/ThreeDotsLabs/watermill
             - github.com/ThreeDotsLabs/watermill-redisstream
             - github.com/ThreeDotsLabs/watermill/message
+            - golang.org/x/sync/errgroup
             - gorm.io/driver
             - gorm.io/gorm
             - ariga.io/atlas/atlasexec

@@ -1,12 +1,13 @@
 package cache
 
 import (
+	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	projectredis "github.com/caitunai/go-blueprint/redis"
+	"github.com/caitunai/go-blueprint/safe"
 )
 
 func TestPutStringRejectsInvalidInputs(t *testing.T) {
@@ -41,9 +42,9 @@ func TestConcurrentInitializationReturnsOneClient(t *testing.T) {
 
 	const goroutines = 50
 	clients := make(chan any, goroutines)
-	var group sync.WaitGroup
+	group := safe.WaitGroup("cache_initialization_test")
 	for range goroutines {
-		group.Go(func() {
+		group.Go(t.Context(), func(context.Context) {
 			clients <- GetClient()
 		})
 	}

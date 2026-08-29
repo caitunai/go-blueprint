@@ -21,6 +21,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/queue/job"
 	"github.com/caitunai/go-blueprint/redis"
+	"github.com/caitunai/go-blueprint/safe"
 )
 
 const (
@@ -159,11 +160,11 @@ func Start(ctx context.Context, subscriberID string) error {
 		return errors.Join(err, Close())
 	}
 	stopConsuming := make(chan struct{})
-	var listeners sync.WaitGroup
+	listeners := safe.WaitGroup("queue_listeners")
 	listenerErrs := make(chan error, len(subscriptions))
 	for _, subscription := range subscriptions {
-		listeners.Go(func() {
-			listenTopic(jobCtx, stopConsuming, subscription, listenerErrs)
+		listeners.Go(jobCtx, func(listenerContext context.Context) {
+			listenTopic(listenerContext, stopConsuming, subscription, listenerErrs)
 		})
 	}
 
@@ -180,7 +181,7 @@ func Start(ctx context.Context, subscriberID string) error {
 	close(stopConsuming)
 	cancelConsume()
 
-	shutdownErr := waitForListeners(&listeners, queueShutdownTimeout())
+	shutdownErr := waitForListeners(ctx, listeners, queueShutdownTimeout())
 	if shutdownErr != nil {
 		cancelJobs()
 	}
@@ -290,20 +291,12 @@ func consumerConcurrency() int {
 	return concurrency
 }
 
-func waitForListeners(listeners *sync.WaitGroup, timeout time.Duration) error {
+func waitForListeners(ctx context.Context, listeners *safe.Group, timeout time.Duration) error {
 	done := make(chan struct{})
-	go func() {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				log.Error().
-					Str("reason", fmt.Sprint(recovered)).
-					Bytes("stack", debug.Stack()).
-					Msg("queue listener waiter panicked")
-			}
-		}()
+	safe.Go(ctx, "queue_listener_waiter", func(context.Context) {
 		listeners.Wait()
 		close(done)
-	}()
+	})
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
@@ -339,7 +332,7 @@ func listenTopic(
 		Str("prefix", viper.GetString("queue.prefix")).
 		Msg("subscribe topic successfully")
 	workers := make(chan struct{}, consumerConcurrency())
-	var workerGroup sync.WaitGroup
+	workerGroup := safe.WaitGroup("queue_message_workers")
 
 listenLoop:
 	for {
@@ -363,10 +356,10 @@ listenLoop:
 				msg.Nack()
 				break listenLoop
 			}
-			workerGroup.Go(func() {
+			workerGroup.Go(jobCtx, func(workerContext context.Context) {
 				defer func() { <-workers }()
 				runMessageWorker(subscription.topic, msg, func() {
-					handleMessage(jobCtx, subscription.topic, msg)
+					handleMessage(workerContext, subscription.topic, msg)
 				})
 			})
 		}

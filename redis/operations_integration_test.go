@@ -1,14 +1,16 @@
 package redis
 
 import (
+	"context"
 	"errors"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/safe"
 )
 
 //nolint:cyclop,funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
@@ -55,12 +57,12 @@ func TestRedisOperationsIntegration(t *testing.T) {
 
 	const goroutines = 16
 	const increments = 50
-	var group sync.WaitGroup
+	group := safe.WaitGroup("redis_increment_test")
 	errorsChannel := make(chan error, goroutines)
 	for range goroutines {
-		group.Go(func() {
+		group.Go(ctx, func(taskContext context.Context) {
 			for range increments {
-				if _, err := Increment(ctx, "counter", time.Minute); err != nil {
+				if _, err := Increment(taskContext, "counter", time.Minute); err != nil {
 					errorsChannel <- err
 					return
 				}

@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -51,7 +53,7 @@ func (s *Server) Start(ctx context.Context) {
 		IdleTimeout:       configuredDuration("server.idleTimeout", noHTTPTimeout),
 	}
 
-	go serve(srv)
+	go serveSafely(srv)
 
 	shutdownContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -68,6 +70,20 @@ func (s *Server) Start(ctx context.Context) {
 	}
 
 	log.Info().Msg("Server exiting")
+}
+
+func serveSafely(srv *http.Server) {
+	defer recoverServerPanic()
+	serve(srv)
+}
+
+func recoverServerPanic() {
+	if recovered := recover(); recovered != nil {
+		log.Error().
+			Str("reason", fmt.Sprint(recovered)).
+			Bytes("stack", debug.Stack()).
+			Msg("HTTP server goroutine panicked")
+	}
 }
 
 func (s *Server) newRouter() *gin.Engine {

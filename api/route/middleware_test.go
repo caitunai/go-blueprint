@@ -1,12 +1,16 @@
 package route
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
 	"github.com/caitunai/go-blueprint/api/base"
@@ -148,6 +152,27 @@ func TestGetBearerToken(t *testing.T) {
 				t.Fatalf("getBearerToken() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSessionUserIDDoesNotLogMissingCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var output bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&output)
+	t.Cleanup(func() {
+		log.Logger = previousLogger
+	})
+
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+
+	if uid := sessionUserID(&base.Context{Context: ginContext}); uid != 0 {
+		t.Fatalf("sessionUserID() = %d, want anonymous user", uid)
+	}
+	if strings.Contains(output.String(), "decode session cookie") {
+		t.Fatalf("missing session cookie produced an error log: %s", output.String())
 	}
 }
 

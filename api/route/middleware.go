@@ -122,7 +122,9 @@ func AttemptAuth() base.HandlerFunc {
 func sessionUserID(c *base.Context) uint64 {
 	id, err := c.DecodeCookie("session_id")
 	if err != nil {
-		log.Debug().Err(err).Msg("decode session cookie")
+		if !errors.Is(err, http.ErrNoCookie) {
+			log.Debug().Err(err).Msg("decode session cookie")
+		}
 		return 0
 	}
 	if id == "" {

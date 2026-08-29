@@ -162,8 +162,9 @@ func Start(ctx context.Context, subscriberID string) error {
 	var listeners sync.WaitGroup
 	listenerErrs := make(chan error, len(subscriptions))
 	for _, subscription := range subscriptions {
-		listeners.Add(1)
-		go listenTopic(jobCtx, stopConsuming, subscription, listenerErrs, &listeners)
+		listeners.Go(func() {
+			listenTopic(jobCtx, stopConsuming, subscription, listenerErrs)
+		})
 	}
 
 	var shutdownReason string
@@ -292,6 +293,14 @@ func consumerConcurrency() int {
 func waitForListeners(listeners *sync.WaitGroup, timeout time.Duration) error {
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Error().
+					Str("reason", fmt.Sprint(recovered)).
+					Bytes("stack", debug.Stack()).
+					Msg("queue listener waiter panicked")
+			}
+		}()
 		listeners.Wait()
 		close(done)
 	}()
@@ -311,7 +320,6 @@ func listenTopic(
 	stop <-chan struct{},
 	subscription topicSubscription,
 	listenerErrs chan<- error,
-	listeners *sync.WaitGroup,
 ) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -325,7 +333,6 @@ func listenTopic(
 			default:
 			}
 		}
-		listeners.Done()
 	}()
 	log.Info().
 		Str("topic", subscription.topic).
@@ -358,11 +365,29 @@ listenLoop:
 			}
 			workerGroup.Go(func() {
 				defer func() { <-workers }()
-				handleMessage(jobCtx, subscription.topic, msg)
+				runMessageWorker(subscription.topic, msg, func() {
+					handleMessage(jobCtx, subscription.topic, msg)
+				})
 			})
 		}
 	}
 	workerGroup.Wait()
+}
+
+func runMessageWorker(topic string, msg *message.Message, handle func()) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Error().
+				Str("topic", topic).
+				Str("job_name", msg.Metadata.Get("name")).
+				Str("job_id", msg.UUID).
+				Str("reason", fmt.Sprint(recovered)).
+				Bytes("stack", debug.Stack()).
+				Msg("queue message worker panicked")
+			msg.Nack()
+		}
+	}()
+	handle()
 }
 
 func handleMessage(ctx context.Context, topic string, msg *message.Message) {

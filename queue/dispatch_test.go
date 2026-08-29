@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,6 +74,24 @@ func TestDispatchExhaustsBoundedRetries(t *testing.T) {
 	}
 	if got := runs.Load(); got != 3 {
 		t.Fatalf("RunJob() calls = %d, want 3", got)
+	}
+}
+
+func TestRunMessageWorkerRecoversAndNacks(t *testing.T) {
+	msg := message.NewMessage("panic-message", []byte("{}"))
+	msg.Metadata.Set("name", "panic-test")
+	var group sync.WaitGroup
+	group.Go(func() {
+		runMessageWorker("default", msg, func() {
+			panic("test panic")
+		})
+	})
+	group.Wait()
+
+	select {
+	case <-msg.Nacked():
+	default:
+		t.Fatal("message was not nacked after worker panic")
 	}
 }
 

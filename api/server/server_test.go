@@ -15,3 +15,13 @@ func TestHTTPTimeoutsDefaultToUnlimited(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoverServerPanic(_ *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer recoverServerPanic()
+		panic("test panic")
+	}()
+	<-done
+}

@@ -66,7 +66,7 @@ func (ctrl *CrudController[M, C, U, V, S]) Create(c *base.Context) {
 func (ctrl *CrudController[M, C, U, V, S]) Get(c *base.Context) {
 	id, err := positiveID(c.Param("id"))
 	if err != nil {
-		c.ErrorForm("invalid id", gin.H{})
+		c.ErrorForm(ErrInvalidID.Error(), gin.H{})
 		return
 	}
 	view, err := ctrl.Service.Get(c, uint(id))
@@ -100,7 +100,7 @@ func (ctrl *CrudController[M, C, U, V, S]) GetAll(c *base.Context) {
 func (ctrl *CrudController[M, C, U, V, S]) Update(c *base.Context) {
 	id, err := positiveID(c.Param("id"))
 	if err != nil {
-		c.ErrorForm("invalid id", gin.H{})
+		c.ErrorForm(ErrInvalidID.Error(), gin.H{})
 		return
 	}
 	var input U
@@ -122,14 +122,14 @@ func (ctrl *CrudController[M, C, U, V, S]) Update(c *base.Context) {
 func (ctrl *CrudController[M, C, U, V, S]) Delete(c *base.Context) {
 	id, err := positiveID(c.Param("id"))
 	if err != nil {
-		c.ErrorForm("invalid id", gin.H{})
+		c.ErrorForm(ErrInvalidID.Error(), gin.H{})
 		return
 	}
 
 	if deleteErr := ctrl.Service.Delete(uint(id)); deleteErr != nil {
-		// Determine whether it's a “not found” error or a system error
-		if deleteErr.Error() == "record not found" {
-			c.NotFound("record not found", gin.H{})
+		// Return a stable not-found response while preserving other service errors.
+		if errors.Is(deleteErr, db.ErrRecordNotFound) {
+			c.NotFound(db.ErrRecordNotFound.Error(), gin.H{})
 			return
 		}
 		c.ErrorMessage(deleteErr.Error())

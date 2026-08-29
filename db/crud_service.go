@@ -2,10 +2,14 @@ package db
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"gorm.io/gorm"
 )
+
+// ErrRecordNotFound indicates that a CRUD target does not exist.
+var ErrRecordNotFound = errors.New("record not found")
 
 // CrudService represents crud service data.
 type CrudService[M IDModel, C InputConverter[M], U InputConverter[M], V ViewConverter[M, V], S Searcher] struct {
@@ -102,13 +106,20 @@ func (s *CrudService[M, C, U, V, S]) Delete(id uint) error {
 	model := s.NewModel()
 	// 1. check it is existed
 	if err := s.DB.First(model, id).Error; err != nil {
-		return err
+		return classifyRecordNotFound(err)
 	}
 
 	// 2. do delete
 	// If the model include gorm.DeletedAt，GORM will do softly delete,
 	// or it will delete the data permanently
 	return s.DB.Delete(model).Error
+}
+
+func classifyRecordNotFound(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errors.Join(ErrRecordNotFound, err)
+	}
+	return err
 }
 
 // ListCursor ================== Query or filter data list ==================

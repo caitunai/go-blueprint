@@ -3,7 +3,10 @@ package storage
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
+
+	"github.com/rs/zerolog/log"
 )
 
 // FS exposes the package's fs value.
@@ -12,18 +15,31 @@ import (
 var FS embed.FS
 
 var (
+	// ErrSubFS indicates that an embedded filesystem subtree is unavailable.
+	ErrSubFS = errors.New("embedded filesystem subtree unavailable")
 	// UI exposes the package's ui value.
-	UI = mustSub(FS, "ui/dist")
+	UI = loadSubFS(FS, "ui/dist")
 	// Assets exposes the package's assets value.
-	Assets = mustSub(UI, "assets")
+	Assets = loadSubFS(UI, "assets")
 	// Static exposes the package's static value.
-	Static = mustSub(FS, "static")
+	Static = loadSubFS(FS, "static")
 )
 
-func mustSub(source fs.FS, directory string) fs.FS {
+type unavailableFS struct {
+	err error
+}
+
+func (filesystem unavailableFS) Open(name string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: name, Err: filesystem.err}
+}
+
+func loadSubFS(source fs.FS, directory string) fs.FS {
 	subtree, err := fs.Sub(source, directory)
 	if err != nil {
-		panic(err)
+		classifiedErr := errors.Join(ErrSubFS, err)
+		log.Error().Err(classifiedErr).Str("directory", directory).
+			Msg("load embedded filesystem subtree failed")
+		return unavailableFS{err: classifiedErr}
 	}
 	return subtree
 }

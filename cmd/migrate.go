@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"os"
+	"os/exec"
 
 	"ariga.io/atlas/atlasexec"
 	"github.com/joho/godotenv"
@@ -91,19 +92,19 @@ migrate make add_users_table --env dev`,
 		if len(args) == 0 {
 			return errMigrationNameRequired
 		}
-		client, err := getAtlasClient()
-		if err != nil {
-			return err
-		}
 
-		params := &atlasexec.MigrateDiffParams{
-			Name: args[0],
-			Env:  atlasEnvName,
-		}
-
-		_, err = client.MigrateDiff(cmd.Context(), params)
-		normal := "The command returned more than one result, use Slice function instead"
-		if err != nil && normal != err.Error() {
+		atlasCmd := exec.CommandContext( //nolint:gosec // Atlas is a fixed executable; Cobra passes arguments without shell expansion.
+			cmd.Context(),
+			"atlas",
+			"migrate",
+			"diff",
+			"--env",
+			atlasEnvName,
+			args[0],
+		)
+		atlasCmd.Stdout = cmd.OutOrStdout()
+		atlasCmd.Stderr = cmd.ErrOrStderr()
+		if err := atlasCmd.Run(); err != nil {
 			return errors.Join(errMigrationCreate, err)
 		}
 

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/utils"
 )
 
+// Logger represents logger data.
 type Logger struct {
 	SourceField           string
 	LogLevel              logger.LogLevel
@@ -18,6 +19,7 @@ type Logger struct {
 	SkipErrRecordNotFound bool
 }
 
+// NewLogger creates a new logger.
 func NewLogger() *Logger {
 	return &Logger{
 		SkipErrRecordNotFound: true,
@@ -26,6 +28,7 @@ func NewLogger() *Logger {
 	}
 }
 
+// LogMode performs the log mode operation.
 func (l *Logger) LogMode(lvl logger.LogLevel) logger.Interface {
 	return &Logger{
 		SlowThreshold:         l.SlowThreshold,
@@ -35,10 +38,12 @@ func (l *Logger) LogMode(lvl logger.LogLevel) logger.Interface {
 	}
 }
 
+// Info performs the info operation.
 func (l *Logger) Info(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Info().Msgf(s, args...)
 }
 
+// Warn performs the warn operation.
 func (l *Logger) Warn(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Warn().Msgf(s, args...)
 }
@@ -47,6 +52,9 @@ func (l *Logger) Error(ctx context.Context, s string, args ...any) {
 	log.Ctx(ctx).Error().Msgf(s, args...)
 }
 
+// Trace exposes the package's trace value.
+//
+//nolint:cyclop // This bounded database lifecycle keeps pool ownership and query classification explicit.
 func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	if l.LogLevel <= logger.Silent {
 		return

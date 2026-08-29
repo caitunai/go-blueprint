@@ -14,8 +14,8 @@ func TestCloseDisconnectsDatabasePool(t *testing.T) {
 		t.Fatalf("sql.Open() error = %v", err)
 	}
 	t.Cleanup(func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("sql.DB.Close() cleanup error = %v", err)
+		if operationErr := sqlDB.Close(); operationErr != nil {
+			t.Errorf("sql.DB.Close() cleanup error = %v", operationErr)
 		}
 	})
 	database, err := gorm.Open(mysql.New(mysql.Config{
@@ -30,13 +30,13 @@ func TestCloseDisconnectsDatabasePool(t *testing.T) {
 	db = database
 	dbMutex.Unlock()
 
-	if err := Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if operationErr := Close(); operationErr != nil {
+		t.Fatalf("Close() error = %v", operationErr)
 	}
-	if err := sqlDB.Ping(); err == nil {
+	if operationErr := sqlDB.PingContext(t.Context()); operationErr == nil {
 		t.Fatal("Ping() succeeded after Close()")
 	}
-	if err := Close(); err != nil {
-		t.Fatalf("second Close() error = %v", err)
+	if operationErr := Close(); operationErr != nil {
+		t.Fatalf("second Close() error = %v", operationErr)
 	}
 }

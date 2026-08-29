@@ -21,6 +21,7 @@ const (
 	configCenterValidationPasswordInvalid
 )
 
+//nolint:funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestValidateConfigCenterAccess(t *testing.T) {
 	t.Parallel()
 

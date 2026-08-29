@@ -3,15 +3,17 @@ package cmd
 import (
 	"errors"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
-	"github.com/rs/zerolog/log"
 
 	"github.com/spf13/cobra"
 )
 
 var subscriberID string
 
+// ErrQueueCommand indicates run queue command failed.
 var ErrQueueCommand = errors.New("run queue command failed")
 
 // queueCmd represents the queue command

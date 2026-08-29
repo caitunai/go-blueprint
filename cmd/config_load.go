@@ -7,20 +7,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caitunai/go-blueprint/db"
-	"github.com/caitunai/go-blueprint/services/configload"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/services/configload"
 )
 
 const defaultConfigLoadHTTPTimeout = 5 * time.Second
 
 var (
-	ErrPublishedConfigLoad     = errors.New("published configuration bootstrap failed")
+	// ErrPublishedConfigLoad indicates published configuration bootstrap failed.
+	ErrPublishedConfigLoad = errors.New("published configuration bootstrap failed")
+	// ErrPublishedConfigSettings indicates read published configuration loader settings failed.
 	ErrPublishedConfigSettings = errors.New("read published configuration loader settings failed")
-	ErrPublishedConfigMerge    = errors.New("merge published configuration into Viper failed")
-	ErrPublishedConfigDB       = errors.New("load published configuration from database failed")
-	protectedBootstrapRoots    = map[string]struct{}{
+	// ErrPublishedConfigMerge indicates merge published configuration into Viper failed.
+	ErrPublishedConfigMerge = errors.New("merge published configuration into Viper failed")
+	// ErrPublishedConfigDB indicates load published configuration from database failed.
+	ErrPublishedConfigDB    = errors.New("load published configuration from database failed")
+	protectedBootstrapRoots = map[string]struct{}{
 		"configcenter": {},
 		"configcrypt":  {},
 		"configload":   {},
@@ -33,8 +38,8 @@ func loadPublishedConfiguration(ctx context.Context, settings configload.Setting
 	if err != nil {
 		return errors.Join(ErrPublishedConfigLoad, err)
 	}
-	if err := mergePublishedConfigurationResults(viper.GetViper(), results); err != nil {
-		return errors.Join(ErrPublishedConfigLoad, err)
+	if mergeErr := mergePublishedConfigurationResults(viper.GetViper(), results); mergeErr != nil {
+		return errors.Join(ErrPublishedConfigLoad, mergeErr)
 	}
 	for index, result := range results {
 		log.Info().
@@ -55,25 +60,28 @@ func publishedConfigLoadSettings(config *viper.Viper) (configload.Settings, erro
 		return configload.Settings{}, errors.Join(ErrPublishedConfigSettings, err)
 	}
 	for index := range targets {
-		if !strings.EqualFold(strings.TrimSpace(string(targets[index].Source)), string(configload.SourceHTTP)) {
-			continue
-		}
-		if targets[index].HTTP.Timeout == 0 {
-			targets[index].HTTP.Timeout = defaultConfigLoadHTTPTimeout
-		}
-		apiKeyEnv := strings.TrimSpace(targets[index].HTTP.APIKeyEnv)
-		if apiKeyEnv != "" {
-			envKeyValue := os.Getenv(apiKeyEnv)
-			if envKeyValue != "" {
-				targets[index].HTTP.APIKey = envKeyValue
-			} else {
-				targets[index].HTTP.APIKey = apiKeyEnv
-			}
-		}
+		applyHTTPConfigLoadDefaults(&targets[index])
 	}
 	return configload.Settings{
 		Targets: targets,
 	}, nil
+}
+
+func applyHTTPConfigLoadDefaults(target *configload.Target) {
+	if !strings.EqualFold(strings.TrimSpace(string(target.Source)), string(configload.SourceHTTP)) {
+		return
+	}
+	if target.HTTP.Timeout == 0 {
+		target.HTTP.Timeout = defaultConfigLoadHTTPTimeout
+	}
+	apiKeyEnv := strings.TrimSpace(target.HTTP.APIKeyEnv)
+	if apiKeyEnv == "" {
+		return
+	}
+	target.HTTP.APIKey = os.Getenv(apiKeyEnv)
+	if target.HTTP.APIKey == "" {
+		target.HTTP.APIKey = apiKeyEnv
+	}
 }
 
 func loadPublishedConfigurationFromDatabase(

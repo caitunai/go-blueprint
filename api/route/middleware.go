@@ -9,12 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caitunai/go-blueprint/api/base"
-	"github.com/caitunai/go-blueprint/db"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/db"
 )
 
 var (
@@ -23,10 +24,15 @@ var (
 	oauthCallbackPath     = "oauth/path/to/callback"
 	configCenterIsEnabled bool
 	configCenterAuth      gin.HandlerFunc
+	// ErrJWTSigningMethod indicates unsupported JWT signing method.
+	ErrJWTSigningMethod = errors.New("unsupported JWT signing method")
+	// ErrJWTPublicKeyAbsent indicates JWT public key not found.
+	ErrJWTPublicKeyAbsent = errors.New("JWT public key not found")
 )
 
 const unauthorizedMessage = "unauthorized"
 
+// InitMiddleware performs the init middleware operation.
 func InitMiddleware() {
 	configureConfigCenterAccess(
 		viper.GetBool("configcenter.enabled"),
@@ -94,85 +100,114 @@ func apiAuthorized(c *base.Context) {
 	c.Next()
 }
 
+// AttemptAuth performs the attempt auth operation.
 func AttemptAuth() base.HandlerFunc {
 	return func(c *base.Context) {
 		if isConfigCenterPath(c.Request.URL.Path) {
 			c.Next()
 			return
 		}
-		var uid uint64
-		id, _ := c.DecodeCookie("session_id")
-		if id != "" {
-			uid, _ = strconv.ParseUint(id, 10, 64)
-		}
+		uid := sessionUserID(c)
 		if uid == 0 {
-			bearerToken := getBearerToken(c.GetHeader("Authorization"))
-			if bearerToken != "" {
-				var accountID uint64
-				token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
-					if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
-						return jwtSecret, nil
-					}
-					if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-						return nil, errors.New("sign method error")
-					}
-					if publicKey == nil {
-						return nil, errors.New("jwt public key not found")
-					}
-					return publicKey, nil
-				})
-				if err != nil {
-					log.Error().Err(err).Msg("parse bearer token error")
-					accountID = 0
-				} else {
-					sub, err := token.Claims.GetSubject()
-					if err != nil {
-						log.Error().Err(err).Msg("get token id error")
-					}
-					accountID, err = strconv.ParseUint(sub, 10, 64)
-					if err != nil {
-						audiences, err := token.Claims.GetAudience()
-						if err == nil && slices.Contains(audiences, viper.GetString("auth.api.audience")) {
-							issuer, err := token.Claims.GetIssuer()
-							if err == nil && slices.Contains(viper.GetStringSlice("auth.api.issuers"), issuer) {
-								c.SetAPIUser(&base.APIUser{
-									User:   sub,
-									Issuer: issuer,
-								})
-							}
-						}
-					}
-				}
-				if accountID > 0 {
-					if c.IsDatabaseEnabled() {
-						u, err := db.RegisterUser(c.Request.Context(), uint(accountID))
-						if err != nil {
-							uid = 0
-						} else if u != nil {
-							c.SetUser(u)
-							uid = uint64(u.ID)
-						}
-					} else {
-						uid = accountID
-					}
-				}
-			}
+			uid = bearerUserID(c)
 		}
-		if uid == 0 && !c.IsWechatMiniProgram() {
-			// is WeChat H5 but not WeChat program
-			ag := strings.ToLower(c.GetHeader("user-agent"))
-			isWechat := strings.Contains(ag, "micromessenger")
-			isCallback := strings.Contains(c.Request.URL.Path, oauthCallbackPath)
-			if isWechat && !isCallback {
-				login(c)
-				c.Abort()
-				return
-			}
+		if uid == 0 && redirectWechatLogin(c) {
+			return
 		}
-
 		c.Set("uid", uint(uid))
 		c.Next()
 	}
+}
+
+func sessionUserID(c *base.Context) uint64 {
+	id, err := c.DecodeCookie("session_id")
+	if err != nil {
+		log.Debug().Err(err).Msg("decode session cookie")
+		return 0
+	}
+	if id == "" {
+		return 0
+	}
+	uid, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		log.Debug().Err(err).Msg("parse session user ID")
+		return 0
+	}
+	return uid
+}
+
+func bearerUserID(c *base.Context) uint64 {
+	bearerToken := getBearerToken(c.GetHeader("Authorization"))
+	if bearerToken == "" {
+		return 0
+	}
+	token, err := jwt.Parse(bearerToken, jwtVerificationKey)
+	if err != nil {
+		log.Error().Err(err).Msg("parse bearer token error")
+		return 0
+	}
+	subject, subjectErr := token.Claims.GetSubject()
+	if subjectErr != nil {
+		log.Error().Err(subjectErr).Msg("get token subject error")
+	}
+	accountID, parseErr := strconv.ParseUint(subject, 10, 64)
+	if parseErr != nil {
+		setAPIUser(c, token, subject)
+		return 0
+	}
+	return persistedUserID(c, accountID)
+}
+
+func jwtVerificationKey(token *jwt.Token) (any, error) {
+	if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
+		return jwtSecret, nil
+	}
+	if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+		return nil, ErrJWTSigningMethod
+	}
+	if publicKey == nil {
+		return nil, ErrJWTPublicKeyAbsent
+	}
+	return publicKey, nil
+}
+
+func setAPIUser(c *base.Context, token *jwt.Token, subject string) {
+	audiences, err := token.Claims.GetAudience()
+	if err != nil || !slices.Contains(audiences, viper.GetString("auth.api.audience")) {
+		return
+	}
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil || !slices.Contains(viper.GetStringSlice("auth.api.issuers"), issuer) {
+		return
+	}
+	c.SetAPIUser(&base.APIUser{User: subject, Issuer: issuer})
+}
+
+func persistedUserID(c *base.Context, accountID uint64) uint64 {
+	if !c.IsDatabaseEnabled() {
+		return accountID
+	}
+	user, err := db.RegisterUser(c.Request.Context(), uint(accountID))
+	if err != nil || user == nil {
+		return 0
+	}
+	c.SetUser(user)
+	return uint64(user.ID)
+}
+
+func redirectWechatLogin(c *base.Context) bool {
+	if c.IsWechatMiniProgram() {
+		return false
+	}
+	userAgent := strings.ToLower(c.GetHeader("user-agent"))
+	isWechat := strings.Contains(userAgent, "micromessenger")
+	isCallback := strings.Contains(c.Request.URL.Path, oauthCallbackPath)
+	if !isWechat || isCallback {
+		return false
+	}
+	login(c)
+	c.Abort()
+	return true
 }
 
 func isConfigCenterPath(path string) bool {
@@ -187,13 +222,14 @@ func getBearerToken(authorization string) string {
 	return strings.TrimSpace(token)
 }
 
+// AuthorizedAllowSpider performs the authorized allow spider operation.
 func AuthorizedAllowSpider() base.HandlerFunc {
 	return func(c *base.Context) {
 		ag := strings.ToLower(c.GetHeader("user-agent"))
 		if strings.Contains(ag, "twitterbot") ||
-			c.Request.Method == "GET" ||
-			c.Request.Method == "HEAD" ||
-			c.Request.Method == "OPTIONS" {
+			c.Request.Method == http.MethodGet ||
+			c.Request.Method == http.MethodHead ||
+			c.Request.Method == http.MethodOptions {
 			c.Next()
 			return
 		}

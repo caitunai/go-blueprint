@@ -5,21 +5,24 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
 	"github.com/caitunai/go-blueprint/cache"
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
 	"github.com/caitunai/go-blueprint/services/configload"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile                      string
+	cfgFile string
+	// ErrCloseApplicationResources indicates close application resources failed.
 	ErrCloseApplicationResources = errors.New("close application resources failed")
+	// ErrExecuteApplicationCommand indicates execute application command failed.
 	ErrExecuteApplicationCommand = errors.New("execute application command failed")
 )
 
@@ -100,8 +103,8 @@ func initializeRootConfiguration(cmd *cobra.Command, _ []string) error {
 	if !shouldLoadPublishedConfiguration(cmd, enabled, settings) {
 		return nil
 	}
-	if err := loadPublishedConfiguration(cmd.Context(), settings); err != nil {
-		return err
+	if loadErr := loadPublishedConfiguration(cmd.Context(), settings); loadErr != nil {
+		return loadErr
 	}
 	return nil
 }

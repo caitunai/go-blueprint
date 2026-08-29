@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -17,55 +18,104 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/caitunai/go-blueprint/services/configcrypt"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/caitunai/go-blueprint/services/configcrypt"
 )
 
 const (
-	configLockUpdate             = "UPDATE"
-	MaxConfigBytes               = 512 * 1024
-	MaxConfigDescriptionBytes    = 512 * 1024
+	configLockUpdate = "UPDATE"
+	// MaxConfigBytes exposes the package's max config bytes value.
+	MaxConfigBytes = 512 * 1024
+	// MaxConfigDescriptionBytes exposes the package's max config description bytes value.
+	MaxConfigDescriptionBytes    = 512 * 1024 //nolint:goconst // Config and description payload limits are independently configurable.
 	maxConfigDepth               = 32
 	maxConfigNodes               = 5000
 	maxConfigCollection          = 1000
 	maxConfigKeyLength           = 128
 	maxConfigStringLength        = 64 * 1024
 	maxConfigDescriptionLength   = 2000
-	maxConfigReleaseReasonLength = 1000
+	maxConfigReleaseReasonLength = 1000 //nolint:goconst // Release-reason and collection limits enforce separate domain constraints.
 	maxConfigEnvironments        = 100
 	maxConfigNamespaces          = 50
 	minConfigAPIKeyLength        = 32
 	maxConfigAPIKeyLength        = 256
 	maxEnvironmentDepth          = 16
-	configReencryptBatchSize     = 100
+	configReencryptBatchSize     = 100 //nolint:goconst // Re-encryption batches and environment capacity are tuned independently.
 	payloadDraftConfig           = "draft-config"
 	payloadDraftDescriptions     = "draft-descriptions"
 	payloadReleaseConfig         = "release-config"
 	payloadReleaseDescriptions   = "release-descriptions"
-	payloadNamespaceAPIKey       = "namespace-api-key"
+	payloadNamespaceAPIKey       = "namespace-api-key" // #nosec G101 -- this is an encryption payload label, not a credential.
 	columnDraftConfig            = "draft_config"
 	columnDraftDescriptions      = "draft_descriptions"
 )
 
 var (
-	ErrConfigNamespaceNotFound     = errors.New("config namespace not found")
-	ErrConfigNamespaceInvalid      = errors.New("invalid config namespace")
-	ErrConfigNamespaceConflict     = errors.New("config namespace conflicts with existing data")
-	ErrConfigAPIKeyInvalid         = errors.New("invalid config namespace API key")
-	ErrConfigAPIKeyUnauthorized    = errors.New("config namespace API key is unauthorized")
-	ErrConfigEncryptionRequired    = errors.New("config encryption is required")
-	ErrConfigEnvironmentNotFound   = errors.New("config environment not found")
-	ErrConfigInvalid               = errors.New("invalid configuration")
-	ErrConfigEnvironmentInvalid    = errors.New("invalid config environment")
-	ErrConfigEnvironmentConflict   = errors.New("config environment conflicts with existing data")
-	ErrConfigEnvironmentInUse      = errors.New("config environment is inherited by another environment")
-	ErrConfigReleaseNotFound       = errors.New("published configuration not found")
-	ErrConfigReleaseInvalid        = errors.New("invalid config release")
+	// ErrConfigNamespaceNotFound indicates config namespace not found.
+	ErrConfigNamespaceNotFound = errors.New("config namespace not found")
+	// ErrConfigNamespaceInvalid indicates invalid config namespace.
+	ErrConfigNamespaceInvalid = errors.New("invalid config namespace")
+	// ErrConfigNamespaceConflict indicates config namespace conflicts with existing data.
+	ErrConfigNamespaceConflict = errors.New("config namespace conflicts with existing data")
+	// ErrConfigAPIKeyInvalid indicates invalid config namespace API key.
+	ErrConfigAPIKeyInvalid = errors.New("invalid config namespace API key")
+	// ErrConfigAPIKeyUnauthorized indicates config namespace API key is unauthorized.
+	ErrConfigAPIKeyUnauthorized = errors.New("config namespace API key is unauthorized")
+	// ErrConfigEncryptionRequired indicates config encryption is required.
+	ErrConfigEncryptionRequired = errors.New("config encryption is required")
+	// ErrConfigEnvironmentNotFound indicates config environment not found.
+	ErrConfigEnvironmentNotFound = errors.New("config environment not found")
+	// ErrConfigInvalid indicates invalid configuration.
+	ErrConfigInvalid = errors.New("invalid configuration")
+	// ErrConfigEnvironmentInvalid indicates invalid config environment.
+	ErrConfigEnvironmentInvalid = errors.New("invalid config environment")
+	// ErrConfigEnvironmentConflict indicates config environment conflicts with existing data.
+	ErrConfigEnvironmentConflict = errors.New("config environment conflicts with existing data")
+	// ErrConfigEnvironmentInUse indicates config environment is inherited by another environment.
+	ErrConfigEnvironmentInUse = errors.New("config environment is inherited by another environment")
+	// ErrConfigReleaseNotFound indicates published configuration not found.
+	ErrConfigReleaseNotFound = errors.New("published configuration not found")
+	// ErrConfigReleaseInvalid indicates invalid config release.
+	ErrConfigReleaseInvalid = errors.New("invalid config release")
+	// ErrConfigStorage indicates config storage operation failed.
 	ErrConfigStorage               = errors.New("config storage operation failed")
 	errConfigReleaseReasonRequired = errors.New("config release reason is required")
 	errConfigReleaseReasonTooLong  = errors.New("config release reason is too long")
+	errNamespaceLimitReached       = errors.New("namespace limit reached")
+	errEnvironmentLimitReached     = errors.New("environment limit reached")
+	errConfigurationTooLarge       = errors.New("configuration is too large")
+	errInheritanceCycle            = errors.New("environment inheritance cycle detected")
+	errInheritanceTooDeep          = errors.New("environment inheritance is too deep")
+	errParentEnvironmentMissing    = errors.New("parent environment does not exist")
+	errConfigSizeInvalid           = errors.New("configuration size is invalid")
+	errConfigRootNotObject         = errors.New("configuration root must be an object")
+	errConfigMultipleJSONValues    = errors.New("configuration contains multiple JSON values")
+	errDescriptionsTooLarge        = errors.New("configuration descriptions are too large")
+	errDescriptionsMultipleValues  = errors.New("configuration descriptions contain multiple JSON values")
+	errTooManyDescriptions         = errors.New("configuration contains too many descriptions")
+	errDescriptionTooLong          = errors.New("configuration description is too long")
+	errDescriptionPathInvalid      = errors.New("configuration description path is invalid")
+	errConfigNestingTooDeep        = errors.New("configuration nesting is too deep")
+	errTooManyConfigValues         = errors.New("configuration contains too many values")
+	errTooManyObjectFields         = errors.New("configuration object contains too many fields")
+	errConfigKeyInvalid            = errors.New("configuration key is invalid")
+	errTooManyArrayItems           = errors.New("configuration array contains too many items")
+	errConfigStringTooLong         = errors.New("configuration string is too long")
+	errUnsupportedConfigValue      = errors.New("configuration contains an unsupported value type")
+	errJSONPointerItemRequired     = errors.New("JSON pointer must identify a configuration item")
+	errJSONPointerInvalidEscape    = errors.New("JSON pointer contains an invalid escape")
+	errNamespaceNameInvalid        = errors.New("namespace name must contain 1 to 100 characters")
+	errNamespaceSlugInvalid        = errors.New("namespace slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores")
+	errNamespaceDescriptionLong    = errors.New("namespace description is too long")
+	errNamespaceAPIKeyRequired     = errors.New("namespace API key is required")
+	errNamespaceAPIKeyLength       = errors.New("namespace API key must contain 32 to 256 URL-safe characters")
+	errEnvironmentNameInvalid      = errors.New("environment name must contain 1 to 100 characters")
+	errEnvironmentSlugInvalid      = errors.New("environment slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores")
+	errEnvironmentDescriptionLong  = errors.New("environment description is too long")
+	errSelfInheritance             = errors.New("an environment cannot inherit from itself")
 
 	configSlugPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 	configAPIKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
@@ -115,6 +165,7 @@ type ConfigRelease struct {
 	Version       uint64    `gorm:"not null;uniqueIndex:idx_config_release_version" json:"version"`
 }
 
+// ConfigEnvironmentInput represents config environment input data.
 type ConfigEnvironmentInput struct {
 	Name        string
 	Slug        string
@@ -122,6 +173,7 @@ type ConfigEnvironmentInput struct {
 	ParentID    uint
 }
 
+// ConfigNamespaceInput represents config namespace input data.
 type ConfigNamespaceInput struct {
 	Name        string
 	Slug        string
@@ -129,6 +181,7 @@ type ConfigNamespaceInput struct {
 	APIKey      string
 }
 
+// ResolvedConfig represents resolved config data.
 type ResolvedConfig struct {
 	Config       map[string]any      `json:"config"`
 	Descriptions ConfigDescriptions  `json:"descriptions"`
@@ -136,6 +189,7 @@ type ResolvedConfig struct {
 	Environment  ConfigEnvironment   `json:"environment"`
 }
 
+// PublishedConfig represents published config data.
 type PublishedConfig struct {
 	PublishedAt   time.Time          `json:"published_at"`
 	Config        map[string]any     `json:"config"`
@@ -146,8 +200,10 @@ type PublishedConfig struct {
 	Version       uint64             `json:"version"`
 }
 
+// ConfigDescriptions represents config descriptions data.
 type ConfigDescriptions map[string]string
 
+// ConfigReleaseSummary represents config release summary data.
 type ConfigReleaseSummary struct {
 	PublishedAt   time.Time `json:"published_at"`
 	BatchID       string    `json:"batch_id"`
@@ -156,17 +212,20 @@ type ConfigReleaseSummary struct {
 	Version       uint64    `json:"version"`
 }
 
+// ConfigPublishResult represents config publish result data.
 type ConfigPublishResult struct {
 	BatchID  string            `json:"batch_id"`
 	Reason   string            `json:"reason"`
 	Releases []PublishedConfig `json:"releases"`
 }
 
+// ConfigPublishInput represents config publish input data.
 type ConfigPublishInput struct {
 	Reason         string
 	EnvironmentIDs []uint
 }
 
+// ConfigReencryptResult represents config reencrypt result data.
 type ConfigReencryptResult struct {
 	NamespaceRecords   int64
 	EnvironmentRecords int64
@@ -174,6 +233,7 @@ type ConfigReencryptResult struct {
 	Payloads           int64
 }
 
+// ListConfigNamespaces lists config namespaces.
 func ListConfigNamespaces(ctx context.Context) ([]ConfigNamespace, error) {
 	namespaces := make([]ConfigNamespace, 0)
 	if err := DB().WithContext(ctx).Order("name ASC, id ASC").Find(&namespaces).Error; err != nil {
@@ -201,6 +261,9 @@ func ListConfigNamespaces(ctx context.Context) ([]ConfigNamespace, error) {
 	return namespaces, nil
 }
 
+// CreateConfigNamespace exposes the package's create config namespace value.
+//
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func CreateConfigNamespace(ctx context.Context, input ConfigNamespaceInput) (*ConfigNamespace, error) {
 	input = normalizeConfigNamespaceInput(input)
 	if err := validateConfigNamespaceInput(input, true); err != nil {
@@ -217,7 +280,7 @@ func CreateConfigNamespace(ctx context.Context, input ConfigNamespaceInput) (*Co
 			return errors.Join(ErrConfigStorage, err)
 		}
 		if count >= maxConfigNamespaces {
-			return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace limit reached"))
+			return errors.Join(ErrConfigNamespaceInvalid, errNamespaceLimitReached)
 		}
 		var existing int64
 		if err := tx.Model(&ConfigNamespace{}).Where("slug = ?", input.Slug).Count(&existing).Error; err != nil {
@@ -235,8 +298,8 @@ func CreateConfigNamespace(ctx context.Context, input ConfigNamespaceInput) (*Co
 		}
 		created.APIKey = storedAPIKey
 		created.APIKeyConfigured = true
-		if err := tx.Model(created).UpdateColumn("api_key", storedAPIKey).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if updateErr := tx.Model(created).UpdateColumn("api_key", storedAPIKey).Error; updateErr != nil {
+			return errors.Join(ErrConfigStorage, updateErr)
 		}
 		return nil
 	})
@@ -246,6 +309,9 @@ func CreateConfigNamespace(ctx context.Context, input ConfigNamespaceInput) (*Co
 	return created, nil
 }
 
+// UpdateConfigNamespace exposes the package's update config namespace value.
+//
+//nolint:cyclop,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func UpdateConfigNamespace(ctx context.Context, id uint, input ConfigNamespaceInput) (*ConfigNamespace, error) {
 	input = normalizeConfigNamespaceInput(input)
 	if id == 0 {
@@ -293,6 +359,7 @@ func UpdateConfigNamespace(ctx context.Context, id uint, input ConfigNamespaceIn
 	return updated, nil
 }
 
+// DeleteConfigNamespace deletes config namespace.
 func DeleteConfigNamespace(ctx context.Context, id uint) error {
 	if id == 0 {
 		return ErrConfigNamespaceNotFound
@@ -307,6 +374,7 @@ func DeleteConfigNamespace(ctx context.Context, id uint) error {
 	return nil
 }
 
+// ListConfigEnvironments lists config environments.
 func ListConfigEnvironments(ctx context.Context, namespaceID uint) ([]ConfigEnvironment, error) {
 	return listConfigEnvironments(ctx, DB(), namespaceID)
 }
@@ -337,6 +405,7 @@ func listConfigEnvironments(ctx context.Context, conn *gorm.DB, namespaceID uint
 	return environments, nil
 }
 
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func applyConfigEnvironmentReleaseState(environments []ConfigEnvironment, releases []ConfigRelease) error {
 	latestByEnvironment := make(map[uint]ConfigRelease, len(releases))
 	for _, release := range releases {
@@ -369,6 +438,9 @@ func applyConfigEnvironmentReleaseState(environments []ConfigEnvironment, releas
 	return nil
 }
 
+// CreateConfigEnvironment exposes the package's create config environment value.
+//
+//nolint:cyclop,funlen,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
 	input = normalizeConfigEnvironmentInput(input)
 	if namespaceID == 0 {
@@ -388,14 +460,14 @@ func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input Config
 			return errors.Join(ErrConfigStorage, err)
 		}
 		if count >= maxConfigEnvironments {
-			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment limit reached"))
+			return errors.Join(ErrConfigEnvironmentInvalid, errEnvironmentLimitReached)
 		}
 		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
 		if err != nil {
 			return err
 		}
-		if err := validateEnvironmentParent(environments, 0, input.ParentID); err != nil {
-			return err
+		if validationErr := validateEnvironmentParent(environments, 0, input.ParentID); validationErr != nil {
+			return validationErr
 		}
 		if environmentSlugExists(environments, input.Slug, 0) {
 			return ErrConfigEnvironmentConflict
@@ -417,8 +489,8 @@ func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input Config
 			DraftDescriptions: initialDescriptions,
 			NamespaceID:       namespaceID,
 		}
-		if err := tx.Create(created).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if createErr := tx.Create(created).Error; createErr != nil {
+			return errors.Join(ErrConfigStorage, createErr)
 		}
 		storedConfig, err := encryptConfigPayload([]byte("{}"), draftPayloadContext(namespaceID, created.ID, payloadDraftConfig))
 		if err != nil {
@@ -430,11 +502,11 @@ func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input Config
 		}
 		created.DraftConfig = storedConfig
 		created.DraftDescriptions = storedDescriptions
-		if err := tx.Model(created).UpdateColumns(map[string]any{
+		if updateErr := tx.Model(created).UpdateColumns(map[string]any{
 			columnDraftConfig:       storedConfig,
 			columnDraftDescriptions: storedDescriptions,
-		}).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		}).Error; updateErr != nil {
+			return errors.Join(ErrConfigStorage, updateErr)
 		}
 		return nil
 	})
@@ -444,6 +516,9 @@ func CreateConfigEnvironment(ctx context.Context, namespaceID uint, input Config
 	return created, nil
 }
 
+// UpdateConfigEnvironment exposes the package's update config environment value.
+//
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func UpdateConfigEnvironment(ctx context.Context, namespaceID, id uint, input ConfigEnvironmentInput) (*ConfigEnvironment, error) {
 	input = normalizeConfigEnvironmentInput(input)
 	if id == 0 {
@@ -459,12 +534,12 @@ func UpdateConfigEnvironment(ctx context.Context, namespaceID, id uint, input Co
 		if err != nil {
 			return err
 		}
-		_, exists := configEnvironmentByID(environments, id)
+		exists := configEnvironmentExists(environments, id)
 		if !exists {
 			return ErrConfigEnvironmentNotFound
 		}
-		if err := validateEnvironmentParent(environments, id, input.ParentID); err != nil {
-			return err
+		if validationErr := validateEnvironmentParent(environments, id, input.ParentID); validationErr != nil {
+			return validationErr
 		}
 		if environmentSlugExists(environments, input.Slug, id) {
 			return ErrConfigEnvironmentConflict
@@ -475,11 +550,11 @@ func UpdateConfigEnvironment(ctx context.Context, namespaceID, id uint, input Co
 			"description": input.Description,
 			"parent_id":   input.ParentID,
 		}
-		if err := tx.Model(&ConfigEnvironment{}).Where("namespace_id = ? AND id = ?", namespaceID, id).Updates(changes).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if updateErr := tx.Model(&ConfigEnvironment{}).Where("namespace_id = ? AND id = ?", namespaceID, id).Updates(changes).Error; updateErr != nil {
+			return errors.Join(ErrConfigStorage, updateErr)
 		}
-		if err := tx.Where("namespace_id = ?", namespaceID).First(updated, id).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if reloadErr := tx.Where("namespace_id = ?", namespaceID).First(updated, id).Error; reloadErr != nil {
+			return errors.Join(ErrConfigStorage, reloadErr)
 		}
 		return nil
 	})
@@ -489,6 +564,9 @@ func UpdateConfigEnvironment(ctx context.Context, namespaceID, id uint, input Co
 	return updated, nil
 }
 
+// DeleteConfigEnvironment exposes the package's delete config environment value.
+//
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func DeleteConfigEnvironment(ctx context.Context, namespaceID, id uint) error {
 	if id == 0 {
 		return ErrConfigEnvironmentNotFound
@@ -498,7 +576,7 @@ func DeleteConfigEnvironment(ctx context.Context, namespaceID, id uint) error {
 		if err != nil {
 			return err
 		}
-		if _, exists := configEnvironmentByID(environments, id); !exists {
+		if !configEnvironmentExists(environments, id) {
 			return ErrConfigEnvironmentNotFound
 		}
 		for _, environment := range environments {
@@ -506,11 +584,11 @@ func DeleteConfigEnvironment(ctx context.Context, namespaceID, id uint) error {
 				return ErrConfigEnvironmentInUse
 			}
 		}
-		if err := tx.Where("environment_id = ?", id).Delete(&ConfigRelease{}).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if releasesDeleteErr := tx.Where("environment_id = ?", id).Delete(&ConfigRelease{}).Error; releasesDeleteErr != nil {
+			return errors.Join(ErrConfigStorage, releasesDeleteErr)
 		}
-		if err := tx.Where("namespace_id = ?", namespaceID).Delete(&ConfigEnvironment{}, id).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if environmentDeleteErr := tx.Where("namespace_id = ?", namespaceID).Delete(&ConfigEnvironment{}, id).Error; environmentDeleteErr != nil {
+			return errors.Join(ErrConfigStorage, environmentDeleteErr)
 		}
 		return nil
 	})
@@ -520,6 +598,9 @@ func DeleteConfigEnvironment(ctx context.Context, namespaceID, id uint) error {
 	return nil
 }
 
+// SaveConfigDraft exposes the package's save config draft value.
+//
+//nolint:cyclop,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func SaveConfigDraft(ctx context.Context, namespaceID, environmentID uint, raw, rawDescriptions []byte) (*ResolvedConfig, error) {
 	config, err := DecodeConfig(raw)
 	if err != nil {
@@ -530,7 +611,7 @@ func SaveConfigDraft(ctx context.Context, namespaceID, environmentID uint, raw, 
 		return nil, errors.Join(ErrConfigInvalid, err)
 	}
 	if len(encoded) > MaxConfigBytes {
-		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration is too large"))
+		return nil, errors.Join(ErrConfigInvalid, errConfigurationTooLarge)
 	}
 	descriptions, err := DecodeConfigDescriptions(rawDescriptions, config)
 	if err != nil {
@@ -543,32 +624,32 @@ func SaveConfigDraft(ctx context.Context, namespaceID, environmentID uint, raw, 
 	result := &ResolvedConfig{}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var environment ConfigEnvironment
-		if err := tx.Clauses(clause.Locking{Strength: configLockUpdate}).
+		if lockErr := tx.Clauses(clause.Locking{Strength: configLockUpdate}).
 			Where("namespace_id = ?", namespaceID).
-			First(&environment, environmentID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.Join(ErrConfigEnvironmentNotFound, err)
+			First(&environment, environmentID).Error; lockErr != nil {
+			if errors.Is(lockErr, gorm.ErrRecordNotFound) {
+				return errors.Join(ErrConfigEnvironmentNotFound, lockErr)
 			}
-			return errors.Join(ErrConfigStorage, err)
+			return errors.Join(ErrConfigStorage, lockErr)
 		}
-		storedConfig, err := encryptConfigPayload(encoded, draftPayloadContext(namespaceID, environmentID, payloadDraftConfig))
-		if err != nil {
-			return err
+		storedConfig, payloadErr := encryptConfigPayload(encoded, draftPayloadContext(namespaceID, environmentID, payloadDraftConfig))
+		if payloadErr != nil {
+			return payloadErr
 		}
-		storedDescriptions, err := encryptConfigPayload(encodedDescriptions, draftPayloadContext(namespaceID, environmentID, payloadDraftDescriptions))
-		if err != nil {
-			return err
+		storedDescriptions, payloadErr := encryptConfigPayload(encodedDescriptions, draftPayloadContext(namespaceID, environmentID, payloadDraftDescriptions))
+		if payloadErr != nil {
+			return payloadErr
 		}
 		changes := map[string]any{
 			columnDraftConfig:       storedConfig,
 			columnDraftDescriptions: storedDescriptions,
 		}
-		if err := tx.Model(&environment).Updates(changes).Error; err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if updateErr := tx.Model(&environment).Updates(changes).Error; updateErr != nil {
+			return errors.Join(ErrConfigStorage, updateErr)
 		}
-		resolved, err := resolveConfig(ctx, tx, namespaceID, environmentID)
-		if err != nil {
-			return err
+		resolved, payloadErr := resolveConfig(ctx, tx, namespaceID, environmentID)
+		if payloadErr != nil {
+			return payloadErr
 		}
 		*result = *resolved
 		return nil
@@ -579,6 +660,7 @@ func SaveConfigDraft(ctx context.Context, namespaceID, environmentID uint, raw, 
 	return result, nil
 }
 
+// GetConfigDraft returns config draft.
 func GetConfigDraft(ctx context.Context, namespaceID, environmentID uint) (*ResolvedConfig, map[string]any, ConfigDescriptions, error) {
 	resolved, err := resolveConfig(ctx, DB(), namespaceID, environmentID)
 	if err != nil {
@@ -603,6 +685,7 @@ func GetConfigDraft(ctx context.Context, namespaceID, environmentID uint) (*Reso
 	return resolved, draft, descriptions, nil
 }
 
+// ResolveConfigDraft performs the resolve config draft operation.
 func ResolveConfigDraft(ctx context.Context, namespaceID, environmentID uint) (*ResolvedConfig, error) {
 	return resolveConfig(ctx, DB(), namespaceID, environmentID)
 }
@@ -615,6 +698,7 @@ func resolveConfig(ctx context.Context, conn *gorm.DB, namespaceID, environmentI
 	return resolveConfigFromEnvironments(environments, environmentID)
 }
 
+//nolint:cyclop,funlen,gocognit // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func resolveConfigFromEnvironments(environments []ConfigEnvironment, environmentID uint) (*ResolvedConfig, error) {
 	byID := make(map[uint]ConfigEnvironment, len(environments))
 	for _, environment := range environments {
@@ -630,19 +714,19 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 	current := target
 	for {
 		if _, duplicate := visited[current.ID]; duplicate {
-			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance cycle detected"))
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errInheritanceCycle)
 		}
 		visited[current.ID] = struct{}{}
 		chain = append(chain, current)
 		if len(chain) > maxEnvironmentDepth {
-			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance is too deep"))
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errInheritanceTooDeep)
 		}
 		if current.ParentID == 0 {
 			break
 		}
 		parent, found := byID[current.ParentID]
 		if !found {
-			return nil, errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+			return nil, errors.Join(ErrConfigEnvironmentInvalid, errParentEnvironmentMissing)
 		}
 		current = parent
 	}
@@ -674,7 +758,11 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 			descriptions,
 			"",
 		)
-		finalConfig = merged.(map[string]any)
+		mergedConfig, ok := merged.(map[string]any)
+		if !ok {
+			return nil, ErrConfigStorage
+		}
+		finalConfig = mergedConfig
 		finalDescriptions = mergedDescriptions
 	}
 	return &ResolvedConfig{
@@ -685,6 +773,9 @@ func resolveConfigFromEnvironments(environments []ConfigEnvironment, environment
 	}, nil
 }
 
+// PublishConfigs exposes the package's publish configs value.
+//
+//nolint:cyclop,funlen,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func PublishConfigs(ctx context.Context, namespaceID uint, input ConfigPublishInput) (*ConfigPublishResult, error) {
 	input.Reason = strings.TrimSpace(input.Reason)
 	if err := validateConfigPublishInput(input); err != nil {
@@ -704,30 +795,30 @@ func PublishConfigs(ctx context.Context, namespaceID uint, input ConfigPublishIn
 		Releases: make([]PublishedConfig, 0, len(ids)),
 	}
 	err = DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		environments, err := lockedConfigEnvironments(ctx, tx, namespaceID)
-		if err != nil {
-			return err
+		environments, lockErr := lockedConfigEnvironments(ctx, tx, namespaceID)
+		if lockErr != nil {
+			return lockErr
 		}
 		for _, id := range ids {
-			if _, exists := configEnvironmentByID(environments, id); !exists {
+			if !configEnvironmentExists(environments, id) {
 				return ErrConfigEnvironmentNotFound
 			}
 		}
 		for _, id := range ids {
-			resolved, err := resolveConfigFromEnvironments(environments, id)
-			if err != nil {
-				return err
+			resolved, publishErr := resolveConfigFromEnvironments(environments, id)
+			if publishErr != nil {
+				return publishErr
 			}
-			encoded, encodedDescriptions, err := encodeResolvedConfig(resolved)
-			if err != nil {
-				return err
+			encoded, encodedDescriptions, publishErr := encodeResolvedConfig(resolved)
+			if publishErr != nil {
+				return publishErr
 			}
 			var latest uint64
-			if err := tx.Model(&ConfigRelease{}).
+			if versionErr := tx.Model(&ConfigRelease{}).
 				Where("environment_id = ?", id).
 				Select("COALESCE(MAX(version), 0)").
-				Scan(&latest).Error; err != nil {
-				return errors.Join(ErrConfigStorage, err)
+				Scan(&latest).Error; versionErr != nil {
+				return errors.Join(ErrConfigStorage, versionErr)
 			}
 			release := &ConfigRelease{
 				EnvironmentID: id,
@@ -735,18 +826,18 @@ func PublishConfigs(ctx context.Context, namespaceID uint, input ConfigPublishIn
 				Reason:        input.Reason,
 				Version:       latest + 1,
 			}
-			storedConfig, err := encryptConfigPayload([]byte(encoded), releasePayloadContext(namespaceID, id, release.Version, payloadReleaseConfig))
-			if err != nil {
-				return err
+			storedConfig, publishErr := encryptConfigPayload([]byte(encoded), releasePayloadContext(namespaceID, id, release.Version, payloadReleaseConfig))
+			if publishErr != nil {
+				return publishErr
 			}
-			storedDescriptions, err := encryptConfigPayload([]byte(encodedDescriptions), releasePayloadContext(namespaceID, id, release.Version, payloadReleaseDescriptions))
-			if err != nil {
-				return err
+			storedDescriptions, publishErr := encryptConfigPayload([]byte(encodedDescriptions), releasePayloadContext(namespaceID, id, release.Version, payloadReleaseDescriptions))
+			if publishErr != nil {
+				return publishErr
 			}
 			release.Config = storedConfig
 			release.Descriptions = storedDescriptions
-			if err := tx.Create(release).Error; err != nil {
-				return errors.Join(ErrConfigStorage, err)
+			if createErr := tx.Create(release).Error; createErr != nil {
+				return errors.Join(ErrConfigStorage, createErr)
 			}
 			result.Releases = append(result.Releases, PublishedConfig{
 				EnvironmentID: id,
@@ -788,6 +879,7 @@ func encodeResolvedConfig(resolved *ResolvedConfig) (string, string, error) {
 	return string(encoded), string(encodedDescriptions), nil
 }
 
+// LatestPublishedConfig performs the latest published config operation.
 func LatestPublishedConfig(ctx context.Context, namespaceID, environmentID uint) (*PublishedConfig, error) {
 	if err := requireConfigEnvironment(ctx, DB(), namespaceID, environmentID); err != nil {
 		return nil, err
@@ -830,6 +922,7 @@ func LatestPublishedConfigBySlugsInternal(
 	return latestPublishedConfigBySlugs(ctx, namespaceSlug, environmentSlug, nil)
 }
 
+//nolint:cyclop,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func latestPublishedConfigBySlugs(
 	ctx context.Context,
 	namespaceSlug string,
@@ -876,6 +969,7 @@ func latestPublishedConfigBySlugs(
 	return namespace, environment, published, nil
 }
 
+// PublishedConfigVersion performs the published config version operation.
 func PublishedConfigVersion(ctx context.Context, namespaceID, environmentID uint, version uint64) (*PublishedConfig, error) {
 	if environmentID == 0 || version == 0 {
 		return nil, ErrConfigReleaseNotFound
@@ -896,6 +990,7 @@ func PublishedConfigVersion(ctx context.Context, namespaceID, environmentID uint
 	return publishedConfigFromRelease(namespaceID, release)
 }
 
+// ListConfigReleases lists config releases.
 func ListConfigReleases(ctx context.Context, namespaceID, environmentID uint) ([]ConfigReleaseSummary, error) {
 	if environmentID == 0 {
 		return nil, ErrConfigEnvironmentNotFound
@@ -919,6 +1014,7 @@ func ListConfigReleases(ctx context.Context, namespaceID, environmentID uint) ([
 	return releases, nil
 }
 
+// ListAllConfigReleases lists all config releases.
 func ListAllConfigReleases(ctx context.Context, namespaceID uint) ([]ConfigReleaseSummary, error) {
 	if err := requireConfigNamespace(ctx, DB(), namespaceID); err != nil {
 		return nil, err
@@ -1055,6 +1151,7 @@ func ReencryptConfigStorage(ctx context.Context) (*ConfigReencryptResult, error)
 	return result, nil
 }
 
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func reencryptConfigNamespaces(ctx context.Context, result *ConfigReencryptResult) error {
 	var lastID uint
 	for {
@@ -1082,8 +1179,8 @@ func reencryptConfigNamespaces(ctx context.Context, result *ConfigReencryptResul
 				if !changed {
 					continue
 				}
-				if err := tx.Model(namespace).UpdateColumn("api_key", updated).Error; err != nil {
-					return errors.Join(ErrConfigStorage, err)
+				if updateErr := tx.Model(namespace).UpdateColumn("api_key", updated).Error; updateErr != nil {
+					return errors.Join(ErrConfigStorage, updateErr)
 				}
 				result.NamespaceRecords++
 				result.Payloads++
@@ -1099,6 +1196,7 @@ func reencryptConfigNamespaces(ctx context.Context, result *ConfigReencryptResul
 	}
 }
 
+//nolint:gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func reencryptConfigEnvironments(ctx context.Context, result *ConfigReencryptResult) error {
 	var lastID uint
 	for {
@@ -1125,11 +1223,11 @@ func reencryptConfigEnvironments(ctx context.Context, result *ConfigReencryptRes
 					return err
 				}
 				if changed {
-					if err := tx.Model(environment).UpdateColumns(map[string]any{
+					if updateErr := tx.Model(environment).UpdateColumns(map[string]any{
 						columnDraftConfig:       updatedConfig,
 						columnDraftDescriptions: updatedDescriptions,
-					}).Error; err != nil {
-						return errors.Join(ErrConfigStorage, err)
+					}).Error; updateErr != nil {
+						return errors.Join(ErrConfigStorage, updateErr)
 					}
 					result.EnvironmentRecords++
 					result.Payloads += payloads
@@ -1147,6 +1245,7 @@ func reencryptConfigEnvironments(ctx context.Context, result *ConfigReencryptRes
 	}
 }
 
+//nolint:cyclop,gocognit // This bounded transactional workflow keeps lock ordering and classified error exits together.
 func reencryptConfigReleases(ctx context.Context, result *ConfigReencryptResult) error {
 	namespaceByEnvironment, err := configEnvironmentNamespaces(ctx)
 	if err != nil {
@@ -1155,14 +1254,14 @@ func reencryptConfigReleases(ctx context.Context, result *ConfigReencryptResult)
 	var lastID uint
 	for {
 		batchSize := 0
-		err := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batchErr := DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			releases := make([]ConfigRelease, 0, configReencryptBatchSize)
-			if err := tx.Clauses(clause.Locking{Strength: configLockUpdate}).
+			if queryErr := tx.Clauses(clause.Locking{Strength: configLockUpdate}).
 				Where("id > ?", lastID).
 				Order("id ASC").
 				Limit(configReencryptBatchSize).
-				Find(&releases).Error; err != nil {
-				return errors.Join(ErrConfigStorage, err)
+				Find(&releases).Error; queryErr != nil {
+				return errors.Join(ErrConfigStorage, queryErr)
 			}
 			batchSize = len(releases)
 			for index := range releases {
@@ -1171,21 +1270,21 @@ func reencryptConfigReleases(ctx context.Context, result *ConfigReencryptResult)
 				if !exists {
 					return ErrConfigEnvironmentNotFound
 				}
-				updatedConfig, updatedDescriptions, payloads, changed, err := reencryptPayloadPair(
+				updatedConfig, updatedDescriptions, payloads, changed, reencryptErr := reencryptPayloadPair(
 					release.Config,
 					release.Descriptions,
 					releasePayloadContext(namespaceID, release.EnvironmentID, release.Version, payloadReleaseConfig),
 					releasePayloadContext(namespaceID, release.EnvironmentID, release.Version, payloadReleaseDescriptions),
 				)
-				if err != nil {
-					return err
+				if reencryptErr != nil {
+					return reencryptErr
 				}
 				if changed {
-					if err := tx.Model(release).UpdateColumns(map[string]any{
+					if updateErr := tx.Model(release).UpdateColumns(map[string]any{
 						"config":       updatedConfig,
 						"descriptions": updatedDescriptions,
-					}).Error; err != nil {
-						return errors.Join(ErrConfigStorage, err)
+					}).Error; updateErr != nil {
+						return errors.Join(ErrConfigStorage, updateErr)
 					}
 					result.ReleaseRecords++
 					result.Payloads += payloads
@@ -1194,8 +1293,8 @@ func reencryptConfigReleases(ctx context.Context, result *ConfigReencryptResult)
 			}
 			return nil
 		})
-		if err != nil {
-			return errors.Join(ErrConfigStorage, err)
+		if batchErr != nil {
+			return errors.Join(ErrConfigStorage, batchErr)
 		}
 		if batchSize < configReencryptBatchSize {
 			return nil
@@ -1237,9 +1336,10 @@ func reencryptPayloadPair(config, descriptions, configContext, descriptionsConte
 	return updatedConfig, updatedDescriptions, payloads, configChanged || descriptionsChanged, nil
 }
 
+// DecodeConfig decodes config.
 func DecodeConfig(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 || len(raw) > MaxConfigBytes {
-		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration size is invalid"))
+		return nil, errors.Join(ErrConfigInvalid, errConfigSizeInvalid)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -1248,12 +1348,12 @@ func DecodeConfig(raw []byte) (map[string]any, error) {
 		return nil, errors.Join(ErrConfigInvalid, err)
 	}
 	if config == nil {
-		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration root must be an object"))
+		return nil, errors.Join(ErrConfigInvalid, errConfigRootNotObject)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			err = errors.New("configuration contains multiple JSON values")
+			err = errConfigMultipleJSONValues
 		}
 		return nil, errors.Join(ErrConfigInvalid, err)
 	}
@@ -1264,12 +1364,15 @@ func DecodeConfig(raw []byte) (map[string]any, error) {
 	return config, nil
 }
 
+// DecodeConfigDescriptions exposes the package's decode config descriptions value.
+//
+//nolint:cyclop,gocognit // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func DecodeConfigDescriptions(raw []byte, config map[string]any) (ConfigDescriptions, error) {
 	if len(raw) == 0 {
 		return make(ConfigDescriptions), nil
 	}
 	if len(raw) > MaxConfigDescriptionBytes {
-		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration descriptions are too large"))
+		return nil, errors.Join(ErrConfigInvalid, errDescriptionsTooLarge)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	var descriptions ConfigDescriptions
@@ -1282,12 +1385,12 @@ func DecodeConfigDescriptions(raw []byte, config map[string]any) (ConfigDescript
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			err = errors.New("configuration descriptions contain multiple JSON values")
+			err = errDescriptionsMultipleValues
 		}
 		return nil, errors.Join(ErrConfigInvalid, err)
 	}
 	if len(descriptions) > maxConfigNodes {
-		return nil, errors.Join(ErrConfigInvalid, errors.New("configuration contains too many descriptions"))
+		return nil, errors.Join(ErrConfigInvalid, errTooManyDescriptions)
 	}
 	normalized := make(ConfigDescriptions, len(descriptions))
 	for pointer, description := range descriptions {
@@ -1296,33 +1399,34 @@ func DecodeConfigDescriptions(raw []byte, config map[string]any) (ConfigDescript
 			continue
 		}
 		if len(description) > maxConfigDescriptionLength {
-			return nil, errors.Join(ErrConfigInvalid, errors.New("configuration description is too long"))
+			return nil, errors.Join(ErrConfigInvalid, errDescriptionTooLong)
 		}
 		path, err := parseJSONPointer(pointer)
 		if err != nil || !configPathExists(config, path) {
-			return nil, errors.Join(ErrConfigInvalid, errors.New("configuration description path is invalid"))
+			return nil, errors.Join(ErrConfigInvalid, errDescriptionPathInvalid)
 		}
 		normalized[pointer] = description
 	}
 	return normalized, nil
 }
 
+//nolint:cyclop,gocognit // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func validateConfigValue(value any, depth int, nodes *int) error {
 	(*nodes)++
 	if depth > maxConfigDepth {
-		return errors.Join(ErrConfigInvalid, errors.New("configuration nesting is too deep"))
+		return errors.Join(ErrConfigInvalid, errConfigNestingTooDeep)
 	}
 	if *nodes > maxConfigNodes {
-		return errors.Join(ErrConfigInvalid, errors.New("configuration contains too many values"))
+		return errors.Join(ErrConfigInvalid, errTooManyConfigValues)
 	}
 	switch typed := value.(type) {
 	case map[string]any:
 		if len(typed) > maxConfigCollection {
-			return errors.Join(ErrConfigInvalid, errors.New("configuration object contains too many fields"))
+			return errors.Join(ErrConfigInvalid, errTooManyObjectFields)
 		}
 		for key, child := range typed {
 			if strings.TrimSpace(key) == "" || len(key) > maxConfigKeyLength {
-				return errors.Join(ErrConfigInvalid, errors.New("configuration key is invalid"))
+				return errors.Join(ErrConfigInvalid, errConfigKeyInvalid)
 			}
 			if err := validateConfigValue(child, depth+1, nodes); err != nil {
 				return err
@@ -1330,7 +1434,7 @@ func validateConfigValue(value any, depth int, nodes *int) error {
 		}
 	case []any:
 		if len(typed) > maxConfigCollection {
-			return errors.Join(ErrConfigInvalid, errors.New("configuration array contains too many items"))
+			return errors.Join(ErrConfigInvalid, errTooManyArrayItems)
 		}
 		for _, child := range typed {
 			if err := validateConfigValue(child, depth+1, nodes); err != nil {
@@ -1339,12 +1443,12 @@ func validateConfigValue(value any, depth int, nodes *int) error {
 		}
 	case string:
 		if len(typed) > maxConfigStringLength {
-			return errors.Join(ErrConfigInvalid, errors.New("configuration string is too long"))
+			return errors.Join(ErrConfigInvalid, errConfigStringTooLong)
 		}
 	case bool, json.Number:
 		return nil
 	default:
-		return errors.Join(ErrConfigInvalid, errors.New("configuration contains an unsupported value type"))
+		return errors.Join(ErrConfigInvalid, errUnsupportedConfigValue)
 	}
 	return nil
 }
@@ -1410,30 +1514,31 @@ func mergeConfigWithDescriptions(
 	return merged, mergedDescriptions
 }
 
+//nolint:gocognit // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func parseJSONPointer(pointer string) ([]string, error) {
 	if pointer == "" || !strings.HasPrefix(pointer, "/") {
-		return nil, errors.New("JSON pointer must identify a configuration item")
+		return nil, errJSONPointerItemRequired
 	}
 	encodedSegments := strings.Split(pointer[1:], "/")
 	segments := make([]string, len(encodedSegments))
 	for index, encoded := range encodedSegments {
-		var builder strings.Builder
+		decoded := make([]byte, 0, len(encoded))
 		for position := 0; position < len(encoded); position++ {
 			if encoded[position] != '~' {
-				builder.WriteByte(encoded[position])
+				decoded = append(decoded, encoded[position])
 				continue
 			}
 			if position+1 >= len(encoded) || (encoded[position+1] != '0' && encoded[position+1] != '1') {
-				return nil, errors.New("JSON pointer contains an invalid escape")
+				return nil, errJSONPointerInvalidEscape
 			}
 			position++
 			if encoded[position] == '0' {
-				builder.WriteByte('~')
+				decoded = append(decoded, '~')
 			} else {
-				builder.WriteByte('/')
+				decoded = append(decoded, '/')
 			}
 		}
-		segments[index] = builder.String()
+		segments[index] = string(decoded)
 	}
 	return segments, nil
 }
@@ -1468,9 +1573,7 @@ func appendJSONPointer(pointer, segment string) string {
 
 func cloneConfigDescriptions(descriptions ConfigDescriptions) ConfigDescriptions {
 	cloned := make(ConfigDescriptions, len(descriptions))
-	for pointer, description := range descriptions {
-		cloned[pointer] = description
-	}
+	maps.Copy(cloned, descriptions)
 	return cloned
 }
 
@@ -1527,35 +1630,36 @@ func normalizeConfigNamespaceInput(input ConfigNamespaceInput) ConfigNamespaceIn
 	return input
 }
 
+//nolint:cyclop // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func validateConfigNamespaceInput(input ConfigNamespaceInput, requireAPIKey bool) error {
 	if input.Name == "" || len(input.Name) > 100 {
-		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace name must contain 1 to 100 characters"))
+		return errors.Join(ErrConfigNamespaceInvalid, errNamespaceNameInvalid)
 	}
 	if !configSlugPattern.MatchString(input.Slug) {
-		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores"))
+		return errors.Join(ErrConfigNamespaceInvalid, errNamespaceSlugInvalid)
 	}
 	if len(input.Description) > 500 {
-		return errors.Join(ErrConfigNamespaceInvalid, errors.New("namespace description is too long"))
+		return errors.Join(ErrConfigNamespaceInvalid, errNamespaceDescriptionLong)
 	}
 	if requireAPIKey && input.APIKey == "" {
-		return errors.Join(ErrConfigAPIKeyInvalid, errors.New("namespace API key is required"))
+		return errors.Join(ErrConfigAPIKeyInvalid, errNamespaceAPIKeyRequired)
 	}
 	if input.APIKey != "" && (len(input.APIKey) < minConfigAPIKeyLength || len(input.APIKey) > maxConfigAPIKeyLength ||
 		!configAPIKeyPattern.MatchString(input.APIKey)) {
-		return errors.Join(ErrConfigAPIKeyInvalid, errors.New("namespace API key must contain 32 to 256 URL-safe characters"))
+		return errors.Join(ErrConfigAPIKeyInvalid, errNamespaceAPIKeyLength)
 	}
 	return nil
 }
 
 func validateConfigEnvironmentInput(input ConfigEnvironmentInput) error {
 	if input.Name == "" || len(input.Name) > 100 {
-		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment name must contain 1 to 100 characters"))
+		return errors.Join(ErrConfigEnvironmentInvalid, errEnvironmentNameInvalid)
 	}
 	if !configSlugPattern.MatchString(input.Slug) {
-		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment slug must start with a letter and contain only lowercase letters, numbers, hyphens, or underscores"))
+		return errors.Join(ErrConfigEnvironmentInvalid, errEnvironmentSlugInvalid)
 	}
 	if len(input.Description) > 500 {
-		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment description is too long"))
+		return errors.Join(ErrConfigEnvironmentInvalid, errEnvironmentDescriptionLong)
 	}
 	return nil
 }
@@ -1606,12 +1710,13 @@ func requireConfigEnvironment(ctx context.Context, conn *gorm.DB, namespaceID, e
 	return nil
 }
 
+//nolint:gocognit // This bounded recursive validation keeps depth, cardinality, and type invariants explicit.
 func validateEnvironmentParent(environments []ConfigEnvironment, environmentID, parentID uint) error {
 	if parentID == 0 {
 		return nil
 	}
 	if parentID == environmentID {
-		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("an environment cannot inherit from itself"))
+		return errors.Join(ErrConfigEnvironmentInvalid, errSelfInheritance)
 	}
 	byID := make(map[uint]ConfigEnvironment, len(environments))
 	for _, environment := range environments {
@@ -1619,15 +1724,15 @@ func validateEnvironmentParent(environments []ConfigEnvironment, environmentID, 
 	}
 	parent, exists := byID[parentID]
 	if !exists {
-		return errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+		return errors.Join(ErrConfigEnvironmentInvalid, errParentEnvironmentMissing)
 	}
 	visited := map[uint]struct{}{environmentID: {}}
 	for depth := 1; ; depth++ {
 		if depth > maxEnvironmentDepth {
-			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance is too deep"))
+			return errors.Join(ErrConfigEnvironmentInvalid, errInheritanceTooDeep)
 		}
 		if _, duplicate := visited[parent.ID]; duplicate {
-			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("environment inheritance cycle detected"))
+			return errors.Join(ErrConfigEnvironmentInvalid, errInheritanceCycle)
 		}
 		visited[parent.ID] = struct{}{}
 		if parent.ParentID == 0 {
@@ -1635,18 +1740,18 @@ func validateEnvironmentParent(environments []ConfigEnvironment, environmentID, 
 		}
 		parent, exists = byID[parent.ParentID]
 		if !exists {
-			return errors.Join(ErrConfigEnvironmentInvalid, errors.New("parent environment does not exist"))
+			return errors.Join(ErrConfigEnvironmentInvalid, errParentEnvironmentMissing)
 		}
 	}
 }
 
-func configEnvironmentByID(environments []ConfigEnvironment, id uint) (ConfigEnvironment, bool) {
+func configEnvironmentExists(environments []ConfigEnvironment, id uint) bool {
 	for _, environment := range environments {
 		if environment.ID == id {
-			return environment, true
+			return true
 		}
 	}
-	return ConfigEnvironment{}, false
+	return false
 }
 
 func environmentSlugExists(environments []ConfigEnvironment, slug string, exceptID uint) bool {

@@ -10,7 +10,9 @@ import (
 )
 
 var (
+	// ErrIncrementNumber indicates error to increment number.
 	ErrIncrementNumber = errors.New("error to increment number")
+	// ErrDecrementNumber indicates error to decrement number.
 	ErrDecrementNumber = errors.New("error to decrement number")
 )
 
@@ -20,10 +22,12 @@ var changeNumberScript = redis.NewScript(
 		"return value",
 )
 
+// Increment performs the increment operation.
 func Increment(ctx context.Context, key string, t time.Duration) (int64, error) {
 	return changeNumber(ctx, key, 1, t, ErrIncrementNumber)
 }
 
+// Decrement performs the decrement operation.
 func Decrement(ctx context.Context, key string, t time.Duration) (int64, error) {
 	return changeNumber(ctx, key, -1, t, ErrDecrementNumber)
 }
@@ -39,8 +43,8 @@ func changeNumber(
 	if err != nil {
 		return 0, errors.Join(operationErr, err)
 	}
-	if err := validateExpiration(expiration); err != nil {
-		return 0, errors.Join(operationErr, err)
+	if validationErr := validateExpiration(expiration); validationErr != nil {
+		return 0, errors.Join(operationErr, validationErr)
 	}
 	result, err := changeNumberScript.Run(
 		ctx,

@@ -41,8 +41,14 @@ func Decrypt(key []byte, cryptoText string) string {
 	if len(texts) != 2 {
 		return ""
 	}
-	data, _ := hex.DecodeString(texts[0])
-	nonce, _ := hex.DecodeString(texts[1])
+	data, err := hex.DecodeString(texts[0])
+	if err != nil {
+		return ""
+	}
+	nonce, err := hex.DecodeString(texts[1])
+	if err != nil {
+		return ""
+	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {

@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"context"
 	"errors"
 	"os"
 	"sync"
@@ -12,12 +11,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+//nolint:cyclop,funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestRedisOperationsIntegration(t *testing.T) {
 	addr := os.Getenv("REDIS_TEST_ADDR")
 	if addr == "" {
 		t.Skip("REDIS_TEST_ADDR is not set")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := goredis.NewClient(&goredis.Options{Addr: addr, DB: 13})
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Fatalf("Ping() error = %v", err)
@@ -32,8 +32,12 @@ func TestRedisOperationsIntegration(t *testing.T) {
 	rdbMutex.Unlock()
 	t.Cleanup(func() {
 		viper.Set("redis.prefix", oldPrefix)
-		_ = client.FlushDB(ctx).Err()
-		_ = Close()
+		if err := client.FlushDB(ctx).Err(); err != nil {
+			t.Errorf("FlushDB() cleanup error = %v", err)
+		}
+		if err := Close(); err != nil {
+			t.Errorf("Close() cleanup error = %v", err)
+		}
 	})
 
 	if err := client.Set(ctx, WithPrefix("expiring"), "value", 0).Err(); err != nil {
@@ -54,16 +58,14 @@ func TestRedisOperationsIntegration(t *testing.T) {
 	var group sync.WaitGroup
 	errorsChannel := make(chan error, goroutines)
 	for range goroutines {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			for range increments {
 				if _, err := Increment(ctx, "counter", time.Minute); err != nil {
 					errorsChannel <- err
 					return
 				}
 			}
-		}()
+		})
 	}
 	group.Wait()
 	close(errorsChannel)

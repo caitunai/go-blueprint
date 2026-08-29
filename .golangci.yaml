@@ -122,11 +122,41 @@ linters:
               desc: Prefer type-safe code over reflection.
             - pkg: github.com/pkg/errors
               desc: Use the standard library errors package.
+    dupl:
+      # The upstream default is 150 tokens; detect smaller duplicated blocks.
+      threshold: 100
+    errcheck:
+      # Do not silently discard errors from type assertions, blank assignments,
+      # or functions in errcheck's built-in exclusion list.
+      check-type-assertions: true
+      check-blank: true
+      disable-default-exclusions: true
+    gochecksumtype:
+      # A default branch must not hide an unhandled sum-type member.
+      default-signifies-exhaustive: false
+    gocognit:
+      # Golangci-lint recommends 10-20; use the strict end of that range.
+      min-complexity: 10
+    goconst:
+      # Extend the default repeated-string checks to numeric constants and
+      # equivalent constant expressions.
+      numbers: true
+      max: 1000
+      find-duplicates: true
+      eval-const-expressions: true
     govet:
       enable-all: true
       settings:
         shadow:
           strict: true
+    interfacebloat:
+      max: 5
+    nakedret:
+      # Named return values remain valid, but implicit bare returns do not.
+      max-func-lines: 0
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     staticcheck:
       checks:
         - all
@@ -139,9 +169,7 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   uniq-by-line: false
-  # Enforce all rules on every changed Go file while legacy debt is retired.
-  new-from-merge-base: main
-  whole-files: true
+  new: false
 
 formatters:
   enable:

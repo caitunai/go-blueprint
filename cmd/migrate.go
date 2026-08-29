@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"ariga.io/atlas/atlasexec"
@@ -25,7 +24,14 @@ var migrateCmd = &cobra.Command{
 	},
 }
 
-var errAtlas = errors.New("atlas migrate error")
+var (
+	errAtlas                 = errors.New("atlas migrate error")
+	errAtlasClient           = errors.New("failed to initialize atlas client")
+	errMigrationInspect      = errors.New("migration inspect failed")
+	errMigrationNameRequired = errors.New("migration name is required")
+	errMigrationCreate       = errors.New("create migration failed")
+	errMigrationApply        = errors.New("migration apply failed")
+)
 
 // init the atlas client
 func getAtlasClient() (*atlasexec.Client, error) {
@@ -36,7 +42,7 @@ func getAtlasClient() (*atlasexec.Client, error) {
 
 	client, err := atlasexec.NewClient(workdir, "atlas")
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize atlas client: %w", err)
+		return nil, errors.Join(errAtlasClient, err)
 	}
 	return client, nil
 }
@@ -57,10 +63,10 @@ var inspectCmd = &cobra.Command{
 
 		res, err := client.SchemaInspect(cmd.Context(), params)
 		if err != nil {
-			return fmt.Errorf("migration inspect failed: %w", err)
+			return errors.Join(errMigrationInspect, err)
 		}
 
-		err = os.WriteFile("./atlas/schema/0-baseline.hcl", []byte(res), 0o644)
+		err = os.WriteFile("./atlas/schema/0-baseline.hcl", []byte(res), 0o600)
 		if err != nil {
 			return errors.Join(err, errAtlas)
 		}
@@ -83,7 +89,7 @@ migrate make add_users_table
 migrate make add_users_table --env dev`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("migration name is required")
+			return errMigrationNameRequired
 		}
 		client, err := getAtlasClient()
 		if err != nil {
@@ -98,7 +104,7 @@ migrate make add_users_table --env dev`,
 		_, err = client.MigrateDiff(cmd.Context(), params)
 		normal := "The command returned more than one result, use Slice function instead"
 		if err != nil && normal != err.Error() {
-			return fmt.Errorf("create migration failed: %w", err)
+			return errors.Join(errMigrationCreate, err)
 		}
 
 		log.Info().
@@ -123,14 +129,17 @@ var applyCmd = &cobra.Command{
 		}
 
 		// support the baseline migration when initialed
-		baseline, _ := cmd.Flags().GetString("baseline")
+		baseline, err := cmd.Flags().GetString("baseline")
+		if err != nil {
+			return errors.Join(errMigrationApply, err)
+		}
 		if baseline != "" {
 			params.BaselineVersion = baseline
 		}
 
 		res, err := client.MigrateApply(cmd.Context(), params)
 		if err != nil {
-			return fmt.Errorf("migration apply failed: %w", err)
+			return errors.Join(errMigrationApply, err)
 		}
 
 		log.Info().Str("command", "apply").Str("current_version", res.Target).Msg("Migration applied.")

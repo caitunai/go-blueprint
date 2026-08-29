@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -14,7 +13,7 @@ func TestCloseDisconnectsRedisClient(t *testing.T) {
 	if err := Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	if err := client.Ping(context.Background()).Err(); !errors.Is(err, goredis.ErrClosed) {
+	if err := client.Ping(t.Context()).Err(); !errors.Is(err, goredis.ErrClosed) {
 		t.Fatalf("Ping() error = %v, want redis.ErrClosed", err)
 	}
 	if err := Close(); err != nil {
@@ -32,7 +31,7 @@ func TestBorrowedClientDoesNotCloseSharedRedisClient(t *testing.T) {
 	if err := Close(); err != nil {
 		t.Fatalf("owner Close() error = %v", err)
 	}
-	if err := client.Ping(context.Background()).Err(); !errors.Is(err, goredis.ErrClosed) {
+	if err := client.Ping(t.Context()).Err(); !errors.Is(err, goredis.ErrClosed) {
 		t.Fatalf("Ping() error = %v, want redis.ErrClosed", err)
 	}
 }

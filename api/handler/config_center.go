@@ -7,12 +7,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caitunai/go-blueprint/api/base"
-	"github.com/caitunai/go-blueprint/db"
-	"github.com/caitunai/go-blueprint/services/configformat"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/services/configformat"
 )
 
 const (
@@ -53,6 +54,7 @@ type configPublishForm struct {
 	EnvironmentIDs []uint `json:"environment_ids" binding:"required,min=1,max=100"`
 }
 
+// ConfigCenterPage performs the config center page operation.
 func ConfigCenterPage(c *base.Context) {
 	cssFiles, jsFiles := c.GetCSSJsFiles(configCenterEntry)
 	assetMode := viper.GetString("ui.assetMode")
@@ -69,6 +71,7 @@ func ConfigCenterPage(c *base.Context) {
 	})
 }
 
+// ConfigCenterControl performs the config center control operation.
 func ConfigCenterControl(r *base.Router) {
 	r.GET("/namespaces", listConfigNamespaces)
 	r.POST("/namespaces", createConfigNamespace)
@@ -88,6 +91,7 @@ func ConfigCenterControl(r *base.Router) {
 	r.POST("/namespaces/:namespace_id/publish", publishConfigs)
 }
 
+// ConfigCenterRuntimeControl performs the config center runtime control operation.
 func ConfigCenterRuntimeControl(r *base.Router) {
 	r.GET("/runtime/:namespace/:environment", getPublishedEnvironmentConfig)
 }
@@ -503,6 +507,14 @@ func inheritedConfig(c *base.Context, namespaceID, parentID uint) (map[string]an
 }
 
 func respondConfigError(c *base.Context, err error) {
+	if respondConfigNamespaceError(c, err) || respondConfigEnvironmentError(c, err) {
+		return
+	}
+	log.Ctx(c.Request.Context()).Error().Err(err).Msg("config center request failed")
+	c.ErrorMessage("配置系统暂时不可用")
+}
+
+func respondConfigNamespaceError(c *base.Context, err error) bool {
 	switch {
 	case errors.Is(err, db.ErrConfigNamespaceNotFound):
 		c.NotFound("命名空间不存在", gin.H{})
@@ -516,6 +528,14 @@ func respondConfigError(c *base.Context, err error) {
 		c.UnauthorizedAPIKey(configAPIKeyRealm, "API Key 无效", gin.H{})
 	case errors.Is(err, db.ErrConfigEncryptionRequired):
 		c.ErrorMessage("配置加密未启用，无法安全保存 API Key")
+	default:
+		return false
+	}
+	return true
+}
+
+func respondConfigEnvironmentError(c *base.Context, err error) bool {
+	switch {
 	case errors.Is(err, db.ErrConfigEnvironmentNotFound):
 		c.NotFound("配置环境不存在", gin.H{})
 	case errors.Is(err, db.ErrConfigReleaseNotFound):
@@ -531,7 +551,7 @@ func respondConfigError(c *base.Context, err error) {
 	case errors.Is(err, db.ErrConfigEnvironmentInvalid):
 		c.ErrorForm("环境信息或继承关系不合法", gin.H{keyConfigReason: err.Error()})
 	default:
-		log.Ctx(c.Request.Context()).Error().Err(err).Msg("config center request failed")
-		c.ErrorMessage("配置系统暂时不可用")
+		return false
 	}
+	return true
 }

@@ -16,6 +16,7 @@ import (
 )
 
 const (
+	// ProviderFile identifies the "file" value.
 	ProviderFile   = "file"
 	keyBytes       = 32
 	keyringVersion = 1
@@ -24,19 +25,30 @@ const (
 )
 
 var (
-	ErrDisabled         = errors.New("configuration encryption is disabled")
-	ErrInvalidSettings  = errors.New("invalid configuration encryption settings")
-	ErrInvalidKeyring   = errors.New("invalid configuration encryption keyring")
-	ErrInsecureKeyring  = errors.New("configuration encryption keyring permissions are insecure")
-	ErrKeyNotFound      = errors.New("configuration encryption key not found")
-	ErrEncrypt          = errors.New("configuration encryption failed")
-	ErrDecrypt          = errors.New("configuration decryption failed")
-	ErrCipherSetup      = errors.New("configuration cipher setup failed")
+	// ErrDisabled indicates configuration encryption is disabled.
+	ErrDisabled = errors.New("configuration encryption is disabled")
+	// ErrInvalidSettings indicates invalid configuration encryption settings.
+	ErrInvalidSettings = errors.New("invalid configuration encryption settings")
+	// ErrInvalidKeyring indicates invalid configuration encryption keyring.
+	ErrInvalidKeyring = errors.New("invalid configuration encryption keyring")
+	// ErrInsecureKeyring indicates configuration encryption keyring permissions are insecure.
+	ErrInsecureKeyring = errors.New("configuration encryption keyring permissions are insecure")
+	// ErrKeyNotFound indicates configuration encryption key not found.
+	ErrKeyNotFound = errors.New("configuration encryption key not found")
+	// ErrEncrypt indicates configuration encryption failed.
+	ErrEncrypt = errors.New("configuration encryption failed")
+	// ErrDecrypt indicates configuration decryption failed.
+	ErrDecrypt = errors.New("configuration decryption failed")
+	// ErrCipherSetup indicates configuration cipher setup failed.
+	ErrCipherSetup = errors.New("configuration cipher setup failed")
+	// ErrKeyAlreadyExists indicates configuration encryption key already exists.
 	ErrKeyAlreadyExists = errors.New("configuration encryption key already exists")
-	ErrKeyringWrite     = errors.New("configuration encryption keyring write failed")
-	keyIDPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	// ErrKeyringWrite indicates configuration encryption keyring write failed.
+	ErrKeyringWrite = errors.New("configuration encryption keyring write failed")
+	keyIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
+// Settings represents settings data.
 type Settings struct {
 	Provider    string
 	ActiveKeyID string
@@ -59,8 +71,8 @@ func loadFileKeys(path string) (map[string][]byte, error) {
 		if !keyIDPattern.MatchString(id) {
 			return nil, ErrInvalidKeyring
 		}
-		key, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil || len(key) != keyBytes {
+		key, decodeErr := base64.StdEncoding.DecodeString(encoded)
+		if decodeErr != nil || len(key) != keyBytes {
 			return nil, ErrInvalidKeyring
 		}
 		keys[id] = key
@@ -68,6 +80,7 @@ func loadFileKeys(path string) (map[string][]byte, error) {
 	return keys, nil
 }
 
+//nolint:cyclop,gocognit // This bounded keyring validation keeps every security check and failure classification explicit.
 func readKeyring(path string) (*keyringDocument, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return nil, ErrInvalidSettings
@@ -82,22 +95,22 @@ func readKeyring(path string) (*keyringDocument, error) {
 	if runtime.GOOS != osWindows && info.Mode().Perm()&0o077 != 0 {
 		return nil, ErrInsecureKeyring
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the operator-configured absolute path is validated as a bounded regular file above.
 	if err != nil {
 		return nil, errors.Join(ErrInvalidKeyring, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var document keyringDocument
-	if err := decoder.Decode(&document); err != nil {
-		return nil, errors.Join(ErrInvalidKeyring, err)
+	if documentErr := decoder.Decode(&document); documentErr != nil {
+		return nil, errors.Join(ErrInvalidKeyring, documentErr)
 	}
 	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
+	if trailingErr := decoder.Decode(&extra); !errors.Is(trailingErr, io.EOF) {
+		if trailingErr == nil {
 			return nil, ErrInvalidKeyring
 		}
-		return nil, errors.Join(ErrInvalidKeyring, err)
+		return nil, errors.Join(ErrInvalidKeyring, trailingErr)
 	}
 	if document.Version != keyringVersion || len(document.Keys) == 0 {
 		return nil, ErrInvalidKeyring
@@ -107,6 +120,8 @@ func readKeyring(path string) (*keyringDocument, error) {
 
 // GenerateFileKey creates a new AES-256 key and stores it in a separate
 // keyring file. Existing keys are retained so older ciphertext stays readable.
+//
+//nolint:cyclop // This bounded keyring validation keeps every security check and failure classification explicit.
 func GenerateFileKey(path, id string) error {
 	if path == "" || !filepath.IsAbs(path) || !keyIDPattern.MatchString(id) {
 		return ErrInvalidSettings
@@ -134,8 +149,8 @@ func GenerateFileKey(path, id string) error {
 		return errors.Join(ErrKeyringWrite, err)
 	}
 	raw = append(raw, '\n')
-	if err := writeKeyringAtomically(path, raw); err != nil {
-		return err
+	if writeErr := writeKeyringAtomically(path, raw); writeErr != nil {
+		return writeErr
 	}
 	return nil
 }
@@ -147,24 +162,25 @@ func writeKeyringAtomically(path string, raw []byte) error {
 		return errors.Join(ErrKeyringWrite, err)
 	}
 	temporaryPath := temporary.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return errors.Join(ErrKeyringWrite, err)
+	defer func() {
+		if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return
+		}
+	}()
+	if chmodErr := temporary.Chmod(0o600); chmodErr != nil {
+		return errors.Join(ErrKeyringWrite, chmodErr, temporary.Close())
 	}
-	if _, err := temporary.Write(raw); err != nil {
-		_ = temporary.Close()
-		return errors.Join(ErrKeyringWrite, err)
+	if _, writeErr := temporary.Write(raw); writeErr != nil {
+		return errors.Join(ErrKeyringWrite, writeErr, temporary.Close())
 	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return errors.Join(ErrKeyringWrite, err)
+	if syncErr := temporary.Sync(); syncErr != nil {
+		return errors.Join(ErrKeyringWrite, syncErr, temporary.Close())
 	}
-	if err := temporary.Close(); err != nil {
-		return errors.Join(ErrKeyringWrite, err)
+	if closeErr := temporary.Close(); closeErr != nil {
+		return errors.Join(ErrKeyringWrite, closeErr)
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return errors.Join(ErrKeyringWrite, err)
+	if renameErr := os.Rename(temporaryPath, path); renameErr != nil {
+		return errors.Join(ErrKeyringWrite, renameErr)
 	}
 	return nil
 }

@@ -1,18 +1,19 @@
 package queue
 
 import (
-	"context"
 	"net"
 	"os"
 	"testing"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/spf13/viper"
+
 	"github.com/caitunai/go-blueprint/queue/job"
 	projectredis "github.com/caitunai/go-blueprint/redis"
-	"github.com/spf13/viper"
 )
 
+//nolint:cyclop,funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestPublisherBoundsStreamLengthIntegration(t *testing.T) {
 	addr := os.Getenv("REDIS_TEST_ADDR")
 	if addr == "" {
@@ -28,25 +29,31 @@ func TestPublisherBoundsStreamLengthIntegration(t *testing.T) {
 	viper.Set("queue.prefix", "queue-integration")
 	viper.Set("queue.streamMaxLength", 1000)
 	viper.Set("queue.deadLetterMaxLength", 10)
-	ctx := context.Background()
-	if err := projectredis.Init(ctx); err != nil {
-		t.Fatalf("redis.Init() error = %v", err)
+	ctx := t.Context()
+	if operationErr := projectredis.Init(ctx); operationErr != nil {
+		t.Fatalf("redis.Init() error = %v", operationErr)
 	}
-	if err := projectredis.GetClient().FlushDB(ctx).Err(); err != nil {
-		t.Fatalf("FlushDB() error = %v", err)
+	if operationErr := projectredis.GetClient().FlushDB(ctx).Err(); operationErr != nil {
+		t.Fatalf("FlushDB() error = %v", operationErr)
 	}
-	if err := Init(); err != nil {
-		t.Fatalf("Init() error = %v", err)
+	if operationErr := Init(); operationErr != nil {
+		t.Fatalf("Init() error = %v", operationErr)
 	}
 	t.Cleanup(func() {
-		_ = Close()
-		_ = projectredis.GetClient().FlushDB(ctx).Err()
-		_ = projectredis.Close()
+		if operationErr := Close(); operationErr != nil {
+			t.Errorf("queue.Close() cleanup error = %v", operationErr)
+		}
+		if operationErr := projectredis.GetClient().FlushDB(ctx).Err(); operationErr != nil {
+			t.Errorf("FlushDB() cleanup error = %v", operationErr)
+		}
+		if operationErr := projectredis.Close(); operationErr != nil {
+			t.Errorf("redis.Close() cleanup error = %v", operationErr)
+		}
 	})
 
 	for number := range 500 {
-		if err := Publish(ctx, &job.Example{Number: number}); err != nil {
-			t.Fatalf("Publish() error = %v", err)
+		if operationErr := Publish(ctx, &job.Example{Number: number}); operationErr != nil {
+			t.Fatalf("Publish() error = %v", operationErr)
 		}
 	}
 	length, err := projectredis.GetClient().XLen(ctx, queueTopic("default")).Result()
@@ -60,8 +67,8 @@ func TestPublisherBoundsStreamLengthIntegration(t *testing.T) {
 	for range 500 {
 		deadLetter := message.NewMessage(watermill.NewUUID(), []byte("failed"))
 		deadLetter.SetContext(ctx)
-		if err := publishMessage("default."+deadLetterSuffix(), deadLetter); err != nil {
-			t.Fatalf("publishMessage(DLQ) error = %v", err)
+		if operationErr := publishMessage("default."+deadLetterSuffix(), deadLetter); operationErr != nil {
+			t.Fatalf("publishMessage(DLQ) error = %v", operationErr)
 		}
 	}
 	deadLetterLength, err := projectredis.GetClient().XLen(

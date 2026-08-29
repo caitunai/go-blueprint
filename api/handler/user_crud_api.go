@@ -7,26 +7,31 @@
 package handler
 
 import (
+	"gorm.io/gorm"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/db"
-	"gorm.io/gorm"
 )
 
+// UserCreateForm represents user create form data.
 type UserCreateForm struct {
 	AccountID uint `form:"account_id" json:"account_id" binding:"required"`
 }
 
+// ToModel performs the to model operation.
 func (u *UserCreateForm) ToModel() *db.User {
 	return &db.User{
 		AccountID: u.AccountID,
 	}
 }
 
+// UserUpdateForm represents user update form data.
 type UserUpdateForm struct {
 	Name      string `form:"name" json:"name" binding:"required"`
 	AccountID uint   `form:"account_id" json:"account_id" binding:"required"`
 }
 
+// ToModel performs the to model operation.
 func (u *UserUpdateForm) ToModel() *db.User {
 	p := &db.User{
 		AccountID: u.AccountID,
@@ -35,12 +40,14 @@ func (u *UserUpdateForm) ToModel() *db.User {
 	return p
 }
 
+// UserPublicView represents user public view data.
 type UserPublicView struct {
 	Name      string `json:"name"`
 	AccountID uint   `json:"account_id"`
 	ID        uint   `json:"id"`
 }
 
+// FromModel performs the from model operation.
 func (u *UserPublicView) FromModel(p *db.User) *UserPublicView {
 	return &UserPublicView{
 		ID:        p.ID,
@@ -49,14 +56,17 @@ func (u *UserPublicView) FromModel(p *db.User) *UserPublicView {
 	}
 }
 
+// Preloads performs the preloads operation.
 func (u *UserPublicView) Preloads() []string {
 	return []string{}
 }
 
+// UserSearchInput represents user search input data.
 type UserSearchInput struct {
 	AccountID uint `form:"account_id"`
 }
 
+// GetScopes returns scopes.
 func (u *UserSearchInput) GetScopes() []func(*gorm.DB) *gorm.DB {
 	var scopes []func(*gorm.DB) *gorm.DB
 
@@ -72,6 +82,7 @@ func (u *UserSearchInput) GetScopes() []func(*gorm.DB) *gorm.DB {
 	return scopes
 }
 
+// UserControl performs the user control operation.
 func UserControl(r *base.Router) {
 	// Generic parameters：Model, Create, Update, View, Search
 	providerService := db.NewCrudService[

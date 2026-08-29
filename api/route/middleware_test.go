@@ -5,8 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/api/base"
 )
 
 const (
@@ -16,6 +19,7 @@ const (
 	testBasicAuthChallenge   = `Basic realm="Authorization Required"`
 )
 
+//nolint:funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestConfigCenterAccessMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -84,7 +88,7 @@ func TestConfigCenterAccessMiddleware(t *testing.T) {
 				c.Status(http.StatusOK)
 			})
 
-			request := httptest.NewRequest(http.MethodGet, "/config-center", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/config-center", nil)
 			if tt.setBasicAuth {
 				request.SetBasicAuth(tt.requestUser, tt.requestPass)
 			}
@@ -110,7 +114,7 @@ func TestConfigCenterRuntimeOnlyUsesEnabledMiddleware(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/config-center/api/runtime/test/production", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/config-center/api/runtime/test/production", nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 
@@ -144,6 +148,54 @@ func TestGetBearerToken(t *testing.T) {
 				t.Fatalf("getBearerToken() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBearerUserIDAcceptsAPIUserWhenSubjectIsInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const (
+		audience = "test-api-audience"
+		issuer   = "test-api-issuer"
+	)
+	secret := []byte("test-api-signing-secret")
+	previousSecret := jwtSecret
+	previousAudience := viper.Get("auth.api.audience")
+	previousIssuers := viper.Get("auth.api.issuers")
+	t.Cleanup(func() {
+		jwtSecret = previousSecret
+		viper.Set("auth.api.audience", previousAudience)
+		viper.Set("auth.api.issuers", previousIssuers)
+	})
+	jwtSecret = secret
+	viper.Set("auth.api.audience", audience)
+	viper.Set("auth.api.issuers", []string{issuer})
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": 123,
+		"aud": audience,
+		"iss": issuer,
+	})
+	signedToken, err := token.SignedString(secret)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	ginContext.Request.Header.Set("Authorization", "Bearer "+signedToken)
+	requestContext := &base.Context{Context: ginContext}
+
+	if uid := bearerUserID(requestContext); uid != 0 {
+		t.Fatalf("bearerUserID() = %d, want 0 for an API user", uid)
+	}
+	apiUser := requestContext.GetAPIUser()
+	if apiUser == nil {
+		t.Fatal("bearerUserID() did not set the API user")
+	}
+	if apiUser.User != "" || apiUser.Issuer != issuer {
+		t.Fatalf("API user = %#v, want empty subject and issuer %q", apiUser, issuer)
 	}
 }
 

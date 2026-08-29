@@ -1,30 +1,41 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/db"
-	"github.com/gin-gonic/gin"
 )
 
 const (
+	// KeyModel identifies the "model" value.
 	KeyModel = "model"
+	// KeyError identifies the "error" value.
 	KeyError = "error"
 )
 
+// ErrInvalidID indicates invalid id.
+var ErrInvalidID = errors.New("invalid id")
+
+// IDQueryAll represents id query all data.
 type IDQueryAll struct {
 	IDs []uint `form:"id[]" json:"ids" binding:"required"`
 }
 
+// CrudController represents crud controller data.
 type CrudController[M db.IDModel, C db.InputConverter[M], U db.InputConverter[M], V db.ViewConverter[M, V], S db.Searcher] struct {
 	Service *db.CrudService[M, C, U, V, S]
 }
 
-func NewCrudController[M db.IDModel, C db.InputConverter[M], U db.InputConverter[M], V db.ViewConverter[M, V], S db.Searcher](s *db.CrudService[M, C, U, V, S]) *CrudController[M, C, U, V, S] {
+// NewCrudController creates a new crud controller.
+func NewCrudController[M db.IDModel, C, U db.InputConverter[M], V db.ViewConverter[M, V], S db.Searcher](s *db.CrudService[M, C, U, V, S]) *CrudController[M, C, U, V, S] {
 	return &CrudController[M, C, U, V, S]{Service: s}
 }
 
+// RegisterRoutes performs the register routes operation.
 func (ctrl *CrudController[M, C, U, V, S]) RegisterRoutes(r *base.Router) {
 	r.POST("", ctrl.Create)
 	r.GET("/:id", ctrl.Get)
@@ -53,7 +64,11 @@ func (ctrl *CrudController[M, C, U, V, S]) Create(c *base.Context) {
 
 // Get one item details, with path param: /:id
 func (ctrl *CrudController[M, C, U, V, S]) Get(c *base.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := positiveID(c.Param("id"))
+	if err != nil {
+		c.ErrorForm("invalid id", gin.H{})
+		return
+	}
 	view, err := ctrl.Service.Get(c, uint(id))
 	if err != nil {
 		c.NotFound(err.Error(), gin.H{KeyError: "not found"})
@@ -83,10 +98,14 @@ func (ctrl *CrudController[M, C, U, V, S]) GetAll(c *base.Context) {
 
 // Update item details, with path param: /:id
 func (ctrl *CrudController[M, C, U, V, S]) Update(c *base.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := positiveID(c.Param("id"))
+	if err != nil {
+		c.ErrorForm("invalid id", gin.H{})
+		return
+	}
 	var input U
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.ErrorForm(err.Error(), gin.H{})
+	if bindErr := c.ShouldBindJSON(&input); bindErr != nil {
+		c.ErrorForm(bindErr.Error(), gin.H{})
 		return
 	}
 	view, err := ctrl.Service.Update(c, uint(id), input)
@@ -101,25 +120,33 @@ func (ctrl *CrudController[M, C, U, V, S]) Update(c *base.Context) {
 
 // Delete one item with path param: /:id
 func (ctrl *CrudController[M, C, U, V, S]) Delete(c *base.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := positiveID(c.Param("id"))
 	if err != nil {
 		c.ErrorForm("invalid id", gin.H{})
 		return
 	}
 
-	if err := ctrl.Service.Delete(uint(id)); err != nil {
+	if deleteErr := ctrl.Service.Delete(uint(id)); deleteErr != nil {
 		// Determine whether it's a “not found” error or a system error
-		if err.Error() == "record not found" {
+		if deleteErr.Error() == "record not found" {
 			c.NotFound("record not found", gin.H{})
 			return
 		}
-		c.ErrorMessage(err.Error())
+		c.ErrorMessage(deleteErr.Error())
 		return
 	}
 
 	c.Success(gin.H{
 		"id": id,
 	})
+}
+
+func positiveID(value string) (int, error) {
+	id, err := strconv.Atoi(value)
+	if err != nil || id <= 0 {
+		return 0, errors.Join(ErrInvalidID, err)
+	}
+	return id, nil
 }
 
 // List : Automatically bind pagination and search parameters

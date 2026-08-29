@@ -3,15 +3,17 @@ package cmd
 import (
 	"errors"
 
+	"github.com/rs/zerolog/log"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+
 	"github.com/caitunai/go-blueprint/api/server"
 	"github.com/caitunai/go-blueprint/cache"
 	"github.com/caitunai/go-blueprint/queue"
 	"github.com/caitunai/go-blueprint/redis"
-	"github.com/rs/zerolog/log"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
+// ErrServeCommand indicates run serve command failed.
 var ErrServeCommand = errors.New("run serve command failed")
 
 // serveCmd represents the serve command

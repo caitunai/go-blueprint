@@ -15,6 +15,7 @@ const (
 	testServiceKey = "service"
 )
 
+//nolint:gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestRenderPublishedConfigurationFormats(t *testing.T) {
 	t.Parallel()
 	config := map[string]any{
@@ -39,8 +40,6 @@ func TestRenderPublishedConfigurationFormats(t *testing.T) {
 		INI:  {"; 配置项描述", "[service]", `host="localhost"`, "ratio=0.75"},
 	}
 	for outputFormat, fragments := range tests {
-		outputFormat := outputFormat
-		fragments := fragments
 		t.Run(string(outputFormat), func(t *testing.T) {
 			t.Parallel()
 			output, err := Render(config, descriptions, outputFormat)
@@ -76,8 +75,8 @@ func TestYAMLAndTOMLOutputsCanBeParsed(t *testing.T) {
 		}
 		parser := viper.New()
 		parser.SetConfigType(string(outputFormat))
-		if err := parser.ReadConfig(bytes.NewReader(output)); err != nil {
-			t.Fatalf("ReadConfig(%s) error = %v\n%s", outputFormat, err, output)
+		if operationErr := parser.ReadConfig(bytes.NewReader(output)); operationErr != nil {
+			t.Fatalf("ReadConfig(%s) error = %v\n%s", outputFormat, operationErr, output)
 		}
 		if parser.GetString("service.host") != testHostValue || parser.GetInt("service.port") != 8080 {
 			t.Fatalf("parsed %s output lost configuration values", outputFormat)

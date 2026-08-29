@@ -1,11 +1,13 @@
 package route
 
 import (
+	"github.com/spf13/viper"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/handler"
-	"github.com/spf13/viper"
 )
 
+// InitRoute performs the init route operation.
 func InitRoute(r *base.Router) {
 	InitMiddleware()
 	r.Use(AttemptAuth())

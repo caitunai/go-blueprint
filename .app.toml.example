@@ -3,6 +3,14 @@ mode="dev"
 url="http://localhost:8080"
 key="key_must_length_32"
 
+[server]
+# 0s preserves net/http's unlimited default. Set a positive duration to opt in.
+readHeaderTimeout="0s"
+readTimeout="0s"
+writeTimeout="0s"
+idleTimeout="0s"
+shutdownTimeout="5s"
+
 [logger]
 level="info"
 

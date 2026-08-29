@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -13,26 +12,65 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/caitunai/go-blueprint/api/base"
-	"github.com/caitunai/go-blueprint/api/route"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/logger"
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/caitunai/go-blueprint/api/base"
+	"github.com/caitunai/go-blueprint/api/route"
 )
 
+// Server represents server data.
 type Server struct {
 	Port string
 	Mode string
 }
 
+const (
+	noHTTPTimeout          time.Duration = 0
+	defaultShutdownTimeout               = 5 * time.Second
+)
+
+// NewServer creates a new server.
 func NewServer(port, mode string) *Server {
 	return &Server{Port: port, Mode: mode}
 }
 
+// Start starts the service lifecycle.
 func (s *Server) Start(ctx context.Context) {
+	r := s.newRouter()
+	srv := &http.Server{
+		Addr:              ":" + s.Port,
+		Handler:           r,
+		ReadHeaderTimeout: configuredDuration("server.readHeaderTimeout", noHTTPTimeout),
+		ReadTimeout:       configuredDuration("server.readTimeout", noHTTPTimeout),
+		WriteTimeout:      configuredDuration("server.writeTimeout", noHTTPTimeout),
+		IdleTimeout:       configuredDuration("server.idleTimeout", noHTTPTimeout),
+	}
+
+	go serve(srv)
+
+	shutdownContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-shutdownContext.Done()
+
+	log.Info().Msg("Shutting down server...")
+	shutdownTimeout := configuredDuration("server.shutdownTimeout", defaultShutdownTimeout)
+	shutdownContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownContext); err != nil {
+		log.Error().Err(err).Msg("Server forced to shutdown")
+		return
+	}
+
+	log.Info().Msg("Server exiting")
+}
+
+func (s *Server) newRouter() *gin.Engine {
 	if s.Mode == gin.ReleaseMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -79,38 +117,19 @@ func (s *Server) Start(ctx context.Context) {
 	}))
 	route.InitRoute(base.NewRouter(r))
 	r.HTMLRender = base.NewRender()
-	srv := &http.Server{
-		Addr:    ":" + s.Port,
-		Handler: r,
+	return r
+}
+
+func serve(srv *http.Server) {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error().Err(err).Msg("listen error")
 	}
+}
 
-	// Initializing the server in a goroutine so that
-	// it won't block the graceful shutdown handling below
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
-			log.Error().Err(err).Msg("listen error")
-		}
-	}()
-
-	// Wait for interrupt signal to gracefully shut down the server with
-	// a timeout of 5 seconds.
-	quit := make(chan os.Signal, 1)
-	// kill (no param) default send syscall.SIGTERM
-	// kill -2 is syscall.SIGINT
-	// kill -9 is syscall.SIGKILL but can't be caught, so don't need to add it
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Info().Msg("Shutting down server...")
-
-	// The context is used to inform the server it has 5 seconds to finish
-	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Server forced to shutdown:")
-		return
+func configuredDuration(key string, fallback time.Duration) time.Duration {
+	value := viper.GetDuration(key)
+	if value <= 0 {
+		return fallback
 	}
-
-	log.Info().Msg("Server exiting")
+	return value
 }

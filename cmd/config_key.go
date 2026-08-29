@@ -4,15 +4,18 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/caitunai/go-blueprint/db"
-	"github.com/caitunai/go-blueprint/services/configcrypt"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/db"
+	"github.com/caitunai/go-blueprint/services/configcrypt"
 )
 
 var (
-	ErrConfigKeyCommand      = errors.New("configuration encryption key command failed")
+	// ErrConfigKeyCommand indicates configuration encryption key command failed.
+	ErrConfigKeyCommand = errors.New("configuration encryption key command failed")
+	// ErrConfigEncryptionSetup indicates configuration encryption setup failed.
 	ErrConfigEncryptionSetup = errors.New("configuration encryption setup failed")
 	generatedKeyID           string
 	generatedKeyring         string

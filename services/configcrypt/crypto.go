@@ -29,6 +29,7 @@ type envelope struct {
 	Version    int    `json:"v"`
 }
 
+// Manager represents manager data.
 type Manager struct {
 	keys        map[string][]byte
 	activeKeyID string
@@ -40,6 +41,7 @@ var (
 	defaultManagerMu sync.RWMutex
 )
 
+// NewManager creates a new manager.
 func NewManager(settings Settings) (*Manager, error) {
 	if !settings.Enabled {
 		return &Manager{}, nil
@@ -57,6 +59,7 @@ func NewManager(settings Settings) (*Manager, error) {
 	return &Manager{enabled: true, activeKeyID: settings.ActiveKeyID, keys: keys}, nil
 }
 
+// Configure performs the configure operation.
 func Configure(settings Settings) error {
 	manager, err := NewManager(settings)
 	if err != nil {
@@ -68,22 +71,27 @@ func Configure(settings Settings) error {
 	return nil
 }
 
+// Enabled performs the enabled operation.
 func Enabled() bool {
 	return currentManager().enabled
 }
 
+// ActiveKeyID performs the active key id operation.
 func ActiveKeyID() string {
 	return currentManager().activeKeyID
 }
 
+// Encrypt performs the encrypt operation.
 func Encrypt(plaintext []byte, context string) (string, error) {
 	return currentManager().Encrypt(plaintext, context)
 }
 
+// Decrypt performs the decrypt operation.
 func Decrypt(stored, context string) ([]byte, bool, error) {
 	return currentManager().Decrypt(stored, context)
 }
 
+// Reencrypt performs the reencrypt operation.
 func Reencrypt(stored, context string) (string, bool, error) {
 	return currentManager().Reencrypt(stored, context)
 }
@@ -95,6 +103,7 @@ func currentManager() *Manager {
 	return manager
 }
 
+// Encrypt performs the encrypt operation.
 func (m *Manager) Encrypt(plaintext []byte, context string) (string, error) {
 	if !m.enabled {
 		return string(plaintext), nil
@@ -122,6 +131,7 @@ func (m *Manager) Encrypt(plaintext []byte, context string) (string, error) {
 	})
 }
 
+// Decrypt performs the decrypt operation.
 func (m *Manager) Decrypt(stored, context string) ([]byte, bool, error) {
 	parsed, encrypted, err := parseEnvelope(stored)
 	if err != nil {
@@ -140,6 +150,7 @@ func (m *Manager) Decrypt(stored, context string) ([]byte, bool, error) {
 	return plaintext, true, nil
 }
 
+// Reencrypt performs the reencrypt operation.
 func (m *Manager) Reencrypt(stored, context string) (string, bool, error) {
 	if !m.enabled {
 		return "", false, ErrDisabled
@@ -149,15 +160,15 @@ func (m *Manager) Reencrypt(stored, context string) (string, bool, error) {
 		return "", false, err
 	}
 	if !encrypted {
-		updated, err := m.Encrypt([]byte(stored), context)
-		return updated, true, err
+		updated, encryptErr := m.Encrypt([]byte(stored), context)
+		return updated, true, encryptErr
 	}
 	dataKey, err := m.unwrapDataKey(parsed, context)
 	if err != nil {
 		return "", false, err
 	}
-	if _, err := open(dataKey, parsed.Ciphertext, parsed.DataNonce, payloadAAD(context)); err != nil {
-		return "", false, errors.Join(ErrDecrypt, err)
+	if _, verifyErr := open(dataKey, parsed.Ciphertext, parsed.DataNonce, payloadAAD(context)); verifyErr != nil {
+		return "", false, errors.Join(ErrDecrypt, verifyErr)
 	}
 	if parsed.KeyID == m.activeKeyID {
 		return stored, false, nil
@@ -209,8 +220,8 @@ func seal(key, plaintext, additionalData []byte) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	nonce := make([]byte, aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, nil, errors.Join(ErrEncrypt, err)
+	if _, randomErr := io.ReadFull(rand.Reader, nonce); randomErr != nil {
+		return nil, nil, errors.Join(ErrEncrypt, randomErr)
 	}
 	return aead.Seal(nil, nonce, plaintext, additionalData), nonce, nil
 }
@@ -267,14 +278,23 @@ func parseEnvelope(stored string) (*envelope, bool, error) {
 		return nil, true, errors.Join(ErrDecrypt, err)
 	}
 	var document envelope
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, true, errors.Join(ErrDecrypt, err)
+	if decodeErr := json.Unmarshal(raw, &document); decodeErr != nil {
+		return nil, true, errors.Join(ErrDecrypt, decodeErr)
 	}
-	if document.Version != cipherVersion || document.Algorithm != cipherAlgorithm || !keyIDPattern.MatchString(document.KeyID) ||
-		document.WrappedDEK == "" || document.WrapNonce == "" || document.DataNonce == "" || document.Ciphertext == "" {
+	if !validEnvelope(document) {
 		return nil, true, ErrDecrypt
 	}
 	return &document, true, nil
+}
+
+func validEnvelope(document envelope) bool {
+	if document.Version != cipherVersion || document.Algorithm != cipherAlgorithm {
+		return false
+	}
+	if !keyIDPattern.MatchString(document.KeyID) {
+		return false
+	}
+	return document.WrappedDEK != "" && document.WrapNonce != "" && document.DataNonce != "" && document.Ciphertext != ""
 }
 
 func payloadAAD(context string) []byte {

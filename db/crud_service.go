@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// CrudService represents crud service data.
 type CrudService[M IDModel, C InputConverter[M], U InputConverter[M], V ViewConverter[M, V], S Searcher] struct {
 	DB              *gorm.DB
 	NewModel        func() M
@@ -14,7 +15,8 @@ type CrudService[M IDModel, C InputConverter[M], U InputConverter[M], V ViewConv
 	NewSearcher     func() S
 }
 
-func NewCrudService[M IDModel, C InputConverter[M], U InputConverter[M], V ViewConverter[M, V], S Searcher](
+// NewCrudService creates a new crud service.
+func NewCrudService[M IDModel, C, U InputConverter[M], V ViewConverter[M, V], S Searcher](
 	model func() M,
 	responseView func() V,
 	searcher func() S,
@@ -41,6 +43,7 @@ func (s *CrudService[M, C, U, V, S]) Create(ctx context.Context, input C) (V, er
 	return view.FromModel(model), nil
 }
 
+// Update performs the update operation.
 func (s *CrudService[M, C, U, V, S]) Update(ctx context.Context, id uint, input U) (V, error) {
 	var model M
 	var view V
@@ -60,6 +63,7 @@ func (s *CrudService[M, C, U, V, S]) Update(ctx context.Context, id uint, input 
 	return view.FromModel(model), nil
 }
 
+// Get performs the get operation.
 func (s *CrudService[M, C, U, V, S]) Get(ctx context.Context, id uint) (V, error) {
 	var model M
 	var view V
@@ -74,6 +78,7 @@ func (s *CrudService[M, C, U, V, S]) Get(ctx context.Context, id uint) (V, error
 	return view.FromModel(model), nil
 }
 
+// GetAll returns all.
 func (s *CrudService[M, C, U, V, S]) GetAll(ctx context.Context, ids []uint) ([]V, error) {
 	var models []M
 	var view V
@@ -92,7 +97,7 @@ func (s *CrudService[M, C, U, V, S]) GetAll(ctx context.Context, ids []uint) ([]
 	return views, nil
 }
 
-// Delete Delete data by id
+// Delete data by id
 func (s *CrudService[M, C, U, V, S]) Delete(id uint) error {
 	model := s.NewModel()
 	// 1. check it is existed
@@ -107,6 +112,8 @@ func (s *CrudService[M, C, U, V, S]) Delete(id uint) error {
 }
 
 // ListCursor ================== Query or filter data list ==================
+//
+//nolint:cyclop,funlen,gocognit // This bounded database lifecycle keeps pool ownership and query classification explicit.
 func (s *CrudService[M, C, U, V, S]) ListCursor(req PagingRequest, search S) (*PagingResponse[V], error) {
 	var models []M
 	limit := req.Limit

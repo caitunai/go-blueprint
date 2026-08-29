@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/caitunai/go-blueprint/queue/job"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/queue/job"
 )
 
 var errTestJob = errors.New("test job failed")
@@ -43,7 +44,7 @@ func TestDispatchRetriesThenSucceeds(t *testing.T) {
 	var runs atomic.Int32
 	register(&controlledJob{name: "retry-test", failures: 2, runs: &runs})
 
-	if err := dispatch(context.Background(), "default", "retry-test", "id", []byte("{}")); err != nil {
+	if err := dispatch(t.Context(), "default", "retry-test", "id", []byte("{}")); err != nil {
 		t.Fatalf("dispatch() error = %v", err)
 	}
 	if got := runs.Load(); got != 3 {
@@ -55,7 +56,7 @@ func TestDispatchReturnsPermanentParseFailure(t *testing.T) {
 	setQueueTestConfig(t)
 	register(&controlledJob{name: "parse-test", parseError: errTestJob})
 
-	err := dispatch(context.Background(), "default", "parse-test", "id", []byte("invalid"))
+	err := dispatch(t.Context(), "default", "parse-test", "id", []byte("invalid"))
 	if !errors.Is(err, ErrParseJob) || !errors.Is(err, job.ErrPermanent) {
 		t.Fatalf("dispatch() error = %v, want parse and permanent errors", err)
 	}
@@ -66,7 +67,7 @@ func TestDispatchExhaustsBoundedRetries(t *testing.T) {
 	var runs atomic.Int32
 	register(&controlledJob{name: "failure-test", failures: 10, runs: &runs})
 
-	err := dispatch(context.Background(), "default", "failure-test", "id", []byte("{}"))
+	err := dispatch(t.Context(), "default", "failure-test", "id", []byte("{}"))
 	if !errors.Is(err, ErrRunJob) {
 		t.Fatalf("dispatch() error = %v, want ErrRunJob", err)
 	}

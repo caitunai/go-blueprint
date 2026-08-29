@@ -8,21 +8,28 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
+
 	"github.com/caitunai/go-blueprint/db"
 	"github.com/caitunai/go-blueprint/storage"
 	"github.com/caitunai/go-blueprint/xutil"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 )
 
+// ErrCookieDecode indicates decode cookie failed.
 var ErrCookieDecode = errors.New("decode cookie failed")
 
 const (
-	HTTP       = "http"
-	HTTPS      = "https"
-	KeyStatus  = "status"
+	// HTTP identifies the "http" value.
+	HTTP = "http"
+	// HTTPS identifies the "https" value.
+	HTTPS = "https"
+	// KeyStatus identifies the "status" value.
+	KeyStatus = "status"
+	// KeyMessage identifies the "message" value.
 	KeyMessage = "message"
-	KeyData    = "data"
+	// KeyData identifies the "data" value.
+	KeyData = "data"
 )
 
 // APIUser The api user information from bearer token, issuer is jwt iss attribute
@@ -32,10 +39,12 @@ type APIUser struct {
 	Issuer string `json:"issuer"`
 }
 
+// Context represents context data.
 type Context struct {
 	*gin.Context
 }
 
+// Scheme performs the scheme operation.
 func (c *Context) Scheme() string {
 	// Can't use `r.Request.URL.Scheme`
 	// See: https://groups.google.com/forum/#!topic/golang-nuts/pMUkBlQBDF0
@@ -57,6 +66,7 @@ func (c *Context) Scheme() string {
 	return HTTP
 }
 
+// Port performs the port operation.
 func (c *Context) Port() string {
 	port := c.GetHeader("X-Forwarded-Port")
 	if port == "" {
@@ -68,6 +78,7 @@ func (c *Context) Port() string {
 	return port
 }
 
+// Origin performs the origin operation.
 func (c *Context) Origin() string {
 	scheme := c.Scheme()
 	port := c.Port()
@@ -86,9 +97,10 @@ func (c *Context) Origin() string {
 	return fmt.Sprintf("%s://%s:%s", scheme, c.Request.Host, port)
 }
 
+// GetCSSJsFiles returns css js files.
 func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	if viper.GetString("ui.assetMode") == "vite" {
-		return
+		return css, js
 	}
 	manifest := storage.ParseManifest()
 	css = manifest.GetCSSFiles(entry)
@@ -103,10 +115,12 @@ func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	return css, js
 }
 
+// Ok performs the ok operation.
 func (c *Context) Ok(body string) {
 	c.String(http.StatusOK, body)
 }
 
+// Success performs the success operation.
 func (c *Context) Success(data gin.H) {
 	c.JSON(http.StatusOK, gin.H{
 		KeyStatus:  0,
@@ -141,6 +155,7 @@ func (c *Context) ErrorMessage(message string) {
 	})
 }
 
+// Unauthorized performs the unauthorized operation.
 func (c *Context) Unauthorized(message string, data gin.H) {
 	c.Header(
 		"WWW-Authenticate",
@@ -153,6 +168,7 @@ func (c *Context) Unauthorized(message string, data gin.H) {
 	})
 }
 
+// UnauthorizedAPIKey performs the unauthorized api key operation.
 func (c *Context) UnauthorizedAPIKey(realm, message string, data gin.H) {
 	c.Header("WWW-Authenticate", "ApiKey realm="+strconv.Quote(realm))
 	c.JSON(http.StatusUnauthorized, gin.H{
@@ -162,6 +178,7 @@ func (c *Context) UnauthorizedAPIKey(realm, message string, data gin.H) {
 	})
 }
 
+// Forbidden performs the forbidden operation.
 func (c *Context) Forbidden(message string, data gin.H) {
 	c.response(http.StatusForbidden, gin.H{
 		KeyStatus:  http.StatusForbidden,
@@ -170,6 +187,7 @@ func (c *Context) Forbidden(message string, data gin.H) {
 	})
 }
 
+// Conflict performs the conflict operation.
 func (c *Context) Conflict(message string, data gin.H) {
 	c.response(http.StatusConflict, gin.H{
 		KeyStatus:  http.StatusConflict,
@@ -178,6 +196,7 @@ func (c *Context) Conflict(message string, data gin.H) {
 	})
 }
 
+// BadRequest performs the bad request operation.
 func (c *Context) BadRequest(message string, data gin.H) {
 	c.response(http.StatusBadRequest, gin.H{
 		KeyStatus:  http.StatusBadRequest,
@@ -186,6 +205,7 @@ func (c *Context) BadRequest(message string, data gin.H) {
 	})
 }
 
+// ErrorForm identifies a or form failure.
 func (c *Context) ErrorForm(message string, data gin.H) {
 	c.response(http.StatusUnprocessableEntity, gin.H{
 		KeyStatus:  http.StatusUnprocessableEntity,
@@ -194,6 +214,7 @@ func (c *Context) ErrorForm(message string, data gin.H) {
 	})
 }
 
+// NotFound performs the not found operation.
 func (c *Context) NotFound(message string, data gin.H) {
 	c.response(http.StatusNotFound, gin.H{
 		KeyStatus:  http.StatusNotFound,
@@ -202,6 +223,7 @@ func (c *Context) NotFound(message string, data gin.H) {
 	})
 }
 
+// View performs the view operation.
 func (c *Context) View(name string, data gin.H) {
 	c.HTML(http.StatusOK, name, data)
 }
@@ -226,6 +248,7 @@ func (c *Context) response(code int, data gin.H) {
 	c.JSON(code, data)
 }
 
+// WantsJSONResponse reports whether json response.
 func (c *Context) WantsJSONResponse() bool {
 	if IsDocumentFetch(c) {
 		return false
@@ -245,6 +268,7 @@ func (c *Context) WantsJSONResponse() bool {
 	return false
 }
 
+// IsDocumentFetch reports whether document fetch.
 func IsDocumentFetch(c *Context) bool {
 	return strings.EqualFold(c.GetHeader("Sec-Fetch-Dest"), "document") ||
 		strings.EqualFold(c.GetHeader("Sec-Fetch-Mode"), "navigate")
@@ -270,7 +294,7 @@ func headerHasHTMLMediaType(header string) bool {
 
 func headerMediaTypes(header string) map[string]struct{} {
 	mediaTypes := make(map[string]struct{})
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
 		if err == nil && mediaType != "" {
 			mediaTypes[strings.ToLower(mediaType)] = struct{}{}
@@ -279,6 +303,7 @@ func headerMediaTypes(header string) map[string]struct{} {
 	return mediaTypes
 }
 
+// PayRequired performs the pay required operation.
 func (c *Context) PayRequired(message string, data gin.H) {
 	c.response(http.StatusPaymentRequired, gin.H{
 		KeyStatus:  http.StatusPaymentRequired,
@@ -287,6 +312,7 @@ func (c *Context) PayRequired(message string, data gin.H) {
 	})
 }
 
+// SendCookie performs the send cookie operation.
 func (c *Context) SendCookie(key, value string, second int) error {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
@@ -301,6 +327,7 @@ func (c *Context) SendCookie(key, value string, second int) error {
 	return nil
 }
 
+// DecodeCookie decodes cookie.
 func (c *Context) DecodeCookie(key string) (string, error) {
 	cookie, err := c.Cookie(key)
 	if err != nil {
@@ -314,40 +341,53 @@ func (c *Context) DecodeCookie(key string) (string, error) {
 	return "", nil
 }
 
+// GetUserID returns user id.
 func (c *Context) GetUserID() uint {
 	return c.GetUint("uid")
 }
 
+// LoginUser performs the login user operation.
 func (c *Context) LoginUser() *db.User {
 	u, ok := c.Get("user")
 	if ok {
-		return u.(*db.User)
+		user, valid := u.(*db.User)
+		if valid {
+			return user
+		}
 	}
 	qu := db.GetUser(c.Request.Context(), c.GetUserID())
 	c.SetUser(qu)
 	return qu
 }
 
+// SetUser sets user.
 func (c *Context) SetUser(u *db.User) {
 	c.Set("user", u)
 }
 
+// SetAPIUser sets api user.
 func (c *Context) SetAPIUser(u *APIUser) {
 	c.Set("api_user", u)
 }
 
+// GetAPIUser returns api user.
 func (c *Context) GetAPIUser() *APIUser {
 	u, ok := c.Get("api_user")
 	if ok {
-		return u.(*APIUser)
+		user, valid := u.(*APIUser)
+		if valid {
+			return user
+		}
 	}
 	return nil
 }
 
+// IsWechatMiniProgram reports whether wechat mini program.
 func (c *Context) IsWechatMiniProgram() bool {
 	return strings.Contains(c.GetHeader("referer"), "https://servicewechat.com")
 }
 
+// GetWechatAppID returns wechat app id.
 func (c *Context) GetWechatAppID() string {
 	refererList := strings.Split(c.GetHeader("referer"), "/")
 	appid := ""
@@ -357,6 +397,7 @@ func (c *Context) GetWechatAppID() string {
 	return appid
 }
 
+// IsDatabaseEnabled reports whether database enabled.
 func (c *Context) IsDatabaseEnabled() bool {
 	dbName := viper.GetString("db.database")
 	return dbName != ""

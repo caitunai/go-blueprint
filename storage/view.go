@@ -6,15 +6,29 @@ import (
 	"io/fs"
 )
 
+// FS exposes the package's fs value.
+//
 //go:embed views ui/dist static
 var FS embed.FS
 
 var (
-	UI, _     = fs.Sub(FS, "ui/dist")
-	Assets, _ = fs.Sub(UI, "assets")
-	Static, _ = fs.Sub(FS, "static")
+	// UI exposes the package's ui value.
+	UI = mustSub(FS, "ui/dist")
+	// Assets exposes the package's assets value.
+	Assets = mustSub(UI, "assets")
+	// Static exposes the package's static value.
+	Static = mustSub(FS, "static")
 )
 
+func mustSub(source fs.FS, directory string) fs.FS {
+	subtree, err := fs.Sub(source, directory)
+	if err != nil {
+		panic(err)
+	}
+	return subtree
+}
+
+// ManifestNode represents manifest node data.
 type ManifestNode struct {
 	Src     string   `json:"src"`
 	File    string   `json:"file"`
@@ -23,8 +37,10 @@ type ManifestNode struct {
 	IsEntry bool     `json:"isEntry"`
 }
 
+// Manifest represents manifest data.
 type Manifest map[string]*ManifestNode
 
+// ParseManifest parses manifest.
 func ParseManifest() Manifest {
 	file, err := FS.ReadFile("ui/dist/manifest.json")
 	if err != nil {
@@ -38,6 +54,7 @@ func ParseManifest() Manifest {
 	return node
 }
 
+// GetCSSFiles returns css files.
 func (m Manifest) GetCSSFiles(entry string) []string {
 	node, ok := m[entry]
 	if !ok {
@@ -46,6 +63,7 @@ func (m Manifest) GetCSSFiles(entry string) []string {
 	return node.CSS
 }
 
+// GetJsFiles returns js files.
 func (m Manifest) GetJsFiles(entry string) []string {
 	node, ok := m[entry]
 	if !ok {

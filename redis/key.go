@@ -8,11 +8,15 @@ import (
 )
 
 var (
-	ErrInvalidKey        = errors.New("redis key is empty")
+	// ErrInvalidKey indicates redis key is empty.
+	ErrInvalidKey = errors.New("redis key is empty")
+	// ErrInvalidExpiration indicates redis expiration must be positive.
 	ErrInvalidExpiration = errors.New("redis expiration must be positive")
-	ErrKeyNotFound       = errors.New("redis key not found")
+	// ErrKeyNotFound indicates redis key not found.
+	ErrKeyNotFound = errors.New("redis key not found")
 )
 
+// WithPrefix performs the with prefix operation.
 func WithPrefix(k string) string {
 	prefix := viper.GetString("redis.prefix")
 	if prefix != "" {

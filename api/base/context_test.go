@@ -16,7 +16,7 @@ func TestUnauthorizedAPIKeyUsesCallerRealm(t *testing.T) {
 		c.UnauthorizedAPIKey("shared-api", "invalid API key", gin.H{})
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/protected", nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 
@@ -37,7 +37,7 @@ func TestUnauthorizedAPIKeyQuotesCallerRealm(t *testing.T) {
 		c.UnauthorizedAPIKey("shared\"api", "invalid API key", gin.H{})
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/protected", nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 

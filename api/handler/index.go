@@ -3,11 +3,13 @@ package handler
 import (
 	"fmt"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/db"
-	"github.com/gin-gonic/gin"
 )
 
+// HomePage performs the home page operation.
 func HomePage(c *base.Context) {
 	var user *db.User
 	if c.IsDatabaseEnabled() {
@@ -24,6 +26,7 @@ func HomePage(c *base.Context) {
 	}
 }
 
+// APIHomePage performs the api home page operation.
 func APIHomePage(c *base.Context) {
 	user := c.GetAPIUser()
 	if user == nil {

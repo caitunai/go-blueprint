@@ -1,30 +1,28 @@
 package xutil
 
 import (
-	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"io"
 	"regexp"
 	"strings"
 )
 
 var stripTagRegx = regexp.MustCompile(`<(.|\n)*?>`)
 
+// SHA256 returns the lowercase hexadecimal SHA-256 digest of value.
+// It is not suitable for password hashing; use a password-specific KDF for passwords.
+func SHA256(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
+}
+
+// StripTags performs the strip tags operation.
 func StripTags(content string) string {
 	return stripTagRegx.ReplaceAllString(content, "")
 }
 
-func Md5(str string) string {
-	h := md5.New()
-	_, err := io.WriteString(h, str)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
+// MaskEmail performs the mask email operation.
 func MaskEmail(i string) string {
 	l := len(i)
 	if l == 0 {
@@ -42,6 +40,7 @@ func MaskEmail(i string) string {
 	return MaskString(addr) + "@" + domain
 }
 
+// MaskString performs the mask string operation.
 func MaskString(s string) string {
 	list := strings.Split(s, "")
 	for i, s2 := range list {
@@ -54,6 +53,7 @@ func MaskString(s string) string {
 	return strings.Join(list, "")
 }
 
+// SubString performs the sub string operation.
 func SubString(s string, start, length int) string {
 	r := []rune(s)
 	if len(r) <= length {
@@ -62,21 +62,20 @@ func SubString(s string, start, length int) string {
 	return string(r[start : length+start])
 }
 
+// SplitByWidth performs the split by width operation.
 func SplitByWidth(str string, size int) []string {
 	chars := []rune(str)
 	strLength := len(chars)
 	var splited []string
 	var stop int
 	for i := 0; i < strLength; i += size {
-		stop = i + size
-		if stop > strLength {
-			stop = strLength
-		}
+		stop = min(i+size, strLength)
 		splited = append(splited, string(chars[i:stop]))
 	}
 	return splited
 }
 
+// RandomString performs the random string operation.
 func RandomString(length int) string {
 	b := make([]byte, length/2)
 	_, err := rand.Read(b)

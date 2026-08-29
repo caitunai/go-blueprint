@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caitunai/go-blueprint/storage"
 	"github.com/gin-gonic/gin/render"
 	"github.com/rs/zerolog/log"
+
+	"github.com/caitunai/go-blueprint/storage"
 )
 
+// Renderer represents renderer data.
 type Renderer interface {
 	render.HTMLRender
 	LoadTemplates()
@@ -21,10 +23,12 @@ type Renderer interface {
 type Render map[string]*template.Template
 
 var (
-	_               render.HTMLRender = Render{}
-	_               Renderer          = Render{}
-	ErrReadLayout                     = errors.New("error to read layout file")
-	ErrPageTemplate                   = errors.New("error to read page template")
+	_ render.HTMLRender = Render{}
+	_ Renderer          = Render{}
+	// ErrReadLayout indicates error to read layout file.
+	ErrReadLayout = errors.New("error to read layout file")
+	// ErrPageTemplate indicates error to read page template.
+	ErrPageTemplate = errors.New("error to read page template")
 )
 
 // NewRender instance
@@ -43,59 +47,65 @@ func (r Render) Instance(name string, data any) render.Render {
 	}
 }
 
+// LoadTemplates loads templates.
 func (r Render) LoadTemplates() {
-	root := "views"
-	layoutFolder := "layout"
-	sharedFolder := "shared"
-	includes, _ := fs.Glob(storage.FS, root+"/**/*.html")
+	includes, err := fs.Glob(storage.FS, "views/**/*.html")
+	if err != nil {
+		log.Error().Err(errors.Join(ErrReadLayout, err)).Msg("Find html templates failed")
+		return
+	}
+	tpl := r.loadLayouts(includes)
+	for _, include := range includes {
+		if r.isLayout(include) || r.isShared(include) {
+			continue
+		}
+		r.loadPage(tpl, include)
+	}
+}
 
-	// Generate our templates map from our layout/ and shared/ directories
-	layouts := make([]string, 0)
-	for _, include := range includes {
-		if strings.Contains(include, layoutFolder) || strings.Contains(include, sharedFolder) {
-			layouts = append(layouts, include)
-		}
-	}
-	var err error
-	var content []byte
+func (r Render) loadLayouts(includes []string) *template.Template {
 	tpl := template.New("tpl")
-	for _, file := range layouts {
-		if r.isLayout(file) || r.isShared(file) {
-			// 布局模版和共享组件
-			content, err = r.readLayoutFile(file)
-		}
-		if err == nil {
-			_, err = tpl.Parse(string(content))
-			if err != nil {
-				log.Error().Err(err).Msgf("Parse html templates failed: %s", file)
-			}
-		}
-	}
 	for _, include := range includes {
-		if !strings.Contains(include, layoutFolder) && !strings.Contains(include, sharedFolder) {
-			// remove .html
-			pageName := strings.TrimSuffix(include, filepath.Ext(include))
-			// remove .app or .tplName
-			pageName = strings.TrimSuffix(pageName, filepath.Ext(pageName))
-			pageName = strings.TrimPrefix(pageName, root+"/")
-			pageName = strings.ReplaceAll(pageName, "/", ".")
-			cloneTpl, cErr := tpl.Clone()
-			if cErr == nil {
-				tmpl := cloneTpl.New(pageName)
-				// read page
-				content, err = r.readPageTemplateFile(include, pageName)
-				if err == nil {
-					_, err = tmpl.Parse(string(content))
-					if err != nil {
-						log.Error().Err(err).Msgf("Parse html templates failed: %s", include)
-					}
-				}
-				r[pageName] = tmpl
-			} else {
-				log.Error().Err(cErr).Str("pageName", pageName).Msgf("clone html template failed: %s", include)
-			}
+		if !r.isLayout(include) && !r.isShared(include) {
+			continue
+		}
+		content, err := r.readLayoutFile(include)
+		if err != nil {
+			log.Error().Err(err).Str("template", include).Msg("Read html template failed")
+			continue
+		}
+		if _, parseErr := tpl.Parse(string(content)); parseErr != nil {
+			log.Error().Err(parseErr).Str("template", include).Msg("Parse html template failed")
 		}
 	}
+	return tpl
+}
+
+func (r Render) loadPage(baseTemplate *template.Template, include string) {
+	pageName := templatePageName(include)
+	clone, err := baseTemplate.Clone()
+	if err != nil {
+		log.Error().Err(err).Str("page", pageName).Msg("Clone html template failed")
+		return
+	}
+	tmpl := clone.New(pageName)
+	content, err := r.readPageTemplateFile(include, pageName)
+	if err != nil {
+		log.Error().Err(err).Str("page", pageName).Msg("Read html page template failed")
+		return
+	}
+	if _, parseErr := tmpl.Parse(string(content)); parseErr != nil {
+		log.Error().Err(parseErr).Str("page", pageName).Msg("Parse html page template failed")
+		return
+	}
+	r[pageName] = tmpl
+}
+
+func templatePageName(include string) string {
+	pageName := strings.TrimSuffix(include, filepath.Ext(include))
+	pageName = strings.TrimSuffix(pageName, filepath.Ext(pageName))
+	pageName = strings.TrimPrefix(pageName, "views/")
+	return strings.ReplaceAll(pageName, "/", ".")
 }
 
 func (r Render) isLayout(file string) bool {

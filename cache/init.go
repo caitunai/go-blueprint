@@ -6,21 +6,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caitunai/go-blueprint/redis"
 	"github.com/go-redis/cache/v9"
+
+	"github.com/caitunai/go-blueprint/redis"
 )
 
 var (
-	cli                *cache.Cache
-	cliMutex           sync.RWMutex
-	ErrPutString       = errors.New("put string in cache failed")
-	ErrGetString       = errors.New("get string from cache failed")
-	ErrDelete          = errors.New("delete cache key failed")
-	ErrCacheMiss       = errors.New("cache key not found")
+	cli      *cache.Cache
+	cliMutex sync.RWMutex
+	// ErrPutString indicates put string in cache failed.
+	ErrPutString = errors.New("put string in cache failed")
+	// ErrGetString indicates get string from cache failed.
+	ErrGetString = errors.New("get string from cache failed")
+	// ErrDelete indicates delete cache key failed.
+	ErrDelete = errors.New("delete cache key failed")
+	// ErrCacheMiss indicates cache key not found.
+	ErrCacheMiss = errors.New("cache key not found")
+	// ErrInvalidCacheKey indicates cache key is empty.
 	ErrInvalidCacheKey = errors.New("cache key is empty")
+	// ErrInvalidCacheTTL indicates cache ttl must be at least one second.
 	ErrInvalidCacheTTL = errors.New("cache ttl must be at least one second")
 )
 
+// InitCache performs the init cache operation.
 func InitCache() {
 	cliMutex.Lock()
 	defer cliMutex.Unlock()
@@ -29,6 +37,7 @@ func InitCache() {
 	}
 }
 
+// GetClient returns client.
 func GetClient() *cache.Cache {
 	cliMutex.RLock()
 	client := cli
@@ -45,6 +54,7 @@ func GetClient() *cache.Cache {
 	return cli
 }
 
+// PutString performs the put string operation.
 func PutString(ctx context.Context, key, value string, ttl time.Duration) error {
 	if key == "" {
 		return errors.Join(ErrPutString, ErrInvalidCacheKey)
@@ -58,6 +68,7 @@ func PutString(ctx context.Context, key, value string, ttl time.Duration) error 
 	return nil
 }
 
+// GetString returns string.
 func GetString(ctx context.Context, key string) (string, error) {
 	if key == "" {
 		return "", errors.Join(ErrGetString, ErrInvalidCacheKey)
@@ -73,6 +84,7 @@ func GetString(ctx context.Context, key string) (string, error) {
 	return "", errors.Join(ErrGetString, err)
 }
 
+// Delete performs the delete operation.
 func Delete(ctx context.Context, key string) error {
 	if key == "" {
 		return errors.Join(ErrDelete, ErrInvalidCacheKey)

@@ -9,15 +9,21 @@ import (
 )
 
 var (
-	ErrAddSortItem        = errors.New("error to add item to sort set")
-	ErrRemoveSortItem     = errors.New("error to remove item from sort set")
+	// ErrAddSortItem indicates error to add item to sort set.
+	ErrAddSortItem = errors.New("error to add item to sort set")
+	// ErrRemoveSortItem indicates error to remove item from sort set.
+	ErrRemoveSortItem = errors.New("error to remove item from sort set")
+	// ErrGetMinimalSortItem indicates error to get the minimal sort item.
 	ErrGetMinimalSortItem = errors.New("error to get the minimal sort item")
-	ErrInvalidSortRange   = errors.New("invalid sorted set score range")
-	ErrInexactSortScore   = errors.New("sorted set score exceeds exact integer range")
+	// ErrInvalidSortRange indicates invalid sorted set score range.
+	ErrInvalidSortRange = errors.New("invalid sorted set score range")
+	// ErrInexactSortScore indicates sorted set score exceeds exact integer range.
+	ErrInexactSortScore = errors.New("sorted set score exceeds exact integer range")
 )
 
 const maxExactFloatInteger = int64(1 << 53)
 
+// AddSortItem performs the add sort item operation.
 func AddSortItem(ctx context.Context, key, item string, value int64) error {
 	redisKey, err := prefixedKey(key)
 	if err != nil {
@@ -59,6 +65,7 @@ func RemoveSortItem(ctx context.Context, key string, minV, maxV int64) error {
 	return nil
 }
 
+// GetMinSortItem returns min sort item.
 func GetMinSortItem(ctx context.Context, key string) (string, error) {
 	redisKey, err := prefixedKey(key)
 	if err != nil {

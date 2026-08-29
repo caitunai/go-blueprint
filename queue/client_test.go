@@ -1,11 +1,11 @@
 package queue
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
+
 	"github.com/caitunai/go-blueprint/queue/job"
 	"github.com/caitunai/go-blueprint/redis"
 )
@@ -34,16 +34,16 @@ func TestCloseWatermillClientsKeepsSharedRedisOwnedByRedisPackage(t *testing.T) 
 	subscriber = streamSubscriber
 	clientMutex.Unlock()
 
-	if err := Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if operationErr := Close(); operationErr != nil {
+		t.Fatalf("Close() error = %v", operationErr)
 	}
-	if err := Close(); err != nil {
-		t.Fatalf("second Close() error = %v", err)
+	if operationErr := Close(); operationErr != nil {
+		t.Fatalf("second Close() error = %v", operationErr)
 	}
-	if err := redis.Close(); err != nil {
-		t.Fatalf("redis.Close() error = %v", err)
+	if operationErr := redis.Close(); operationErr != nil {
+		t.Fatalf("redis.Close() error = %v", operationErr)
 	}
-	if err := Publish(context.Background(), &job.Example{}); !errors.Is(err, ErrPublisherNotReady) {
-		t.Fatalf("Publish() error = %v, want ErrPublisherNotReady", err)
+	if operationErr := Publish(t.Context(), &job.Example{}); !errors.Is(operationErr, ErrPublisherNotReady) {
+		t.Fatalf("Publish() error = %v, want ErrPublisherNotReady", operationErr)
 	}
 }

@@ -22,6 +22,7 @@ const (
 	testServiceHostPointer = "/service/host"
 )
 
+//nolint:cyclop,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestNamespaceAPIKeyIsEncryptedAndAuthenticated(t *testing.T) {
 	keyringPath := filepath.Join(t.TempDir(), "keys.json")
 	if err := configcrypt.GenerateFileKey(keyringPath, "namespace-test-key"); err != nil {
@@ -57,11 +58,11 @@ func TestNamespaceAPIKeyIsEncryptedAndAuthenticated(t *testing.T) {
 	if strings.Contains(string(publicView), stored) || strings.Contains(string(publicView), apiKey) {
 		t.Fatal("ConfigNamespace JSON exposed API key material")
 	}
-	if err := authenticateNamespaceAPIKey(namespace, apiKey); err != nil {
-		t.Fatalf("authenticateNamespaceAPIKey() error = %v", err)
+	if operationErr := authenticateNamespaceAPIKey(namespace, apiKey); operationErr != nil {
+		t.Fatalf("authenticateNamespaceAPIKey() error = %v", operationErr)
 	}
-	if err := authenticateNamespaceAPIKey(namespace, strings.Repeat("b", minConfigAPIKeyLength)); !errors.Is(err, ErrConfigAPIKeyUnauthorized) {
-		t.Fatalf("authenticateNamespaceAPIKey() error = %v, want ErrConfigAPIKeyUnauthorized", err)
+	if operationErr := authenticateNamespaceAPIKey(namespace, strings.Repeat("b", minConfigAPIKeyLength)); !errors.Is(operationErr, ErrConfigAPIKeyUnauthorized) {
+		t.Fatalf("authenticateNamespaceAPIKey() error = %v, want ErrConfigAPIKeyUnauthorized", operationErr)
 	}
 }
 
@@ -156,8 +157,8 @@ func TestMergeConfigRecursivelyMergesObjectsAndReplacesArrays(t *testing.T) {
 	if gotErr != nil || wantErr != nil || string(gotJSON) != string(wantJSON) {
 		t.Fatalf("mergeConfig() = %#v, want %#v", got, want)
 	}
-	got.(map[string]any)[testService].(map[string]any)[testHost] = "changed"
-	if base[testService].(map[string]any)[testHost] != testBase {
+	mapValue(t, mapValue(t, got)[testService])[testHost] = "changed"
+	if mapValue(t, base[testService])[testHost] != testBase {
 		t.Fatal("mergeConfig() mutated the base configuration")
 	}
 }
@@ -221,7 +222,7 @@ func TestMergeConfigWithDescriptionsReplacesDescriptionSubtrees(t *testing.T) {
 	if !equalDescriptions(descriptions, want) {
 		t.Fatalf("descriptions = %#v, want %#v", descriptions, want)
 	}
-	if merged.(map[string]any)[testService].(map[string]any)[testPort] != json.Number("80") {
+	if mapValue(t, mapValue(t, merged)[testService])[testPort] != json.Number("80") {
 		t.Fatal("mergeConfigWithDescriptions() did not preserve inherited object fields")
 	}
 }
@@ -236,6 +237,15 @@ func equalDescriptions(left, right ConfigDescriptions) bool {
 		}
 	}
 	return true
+}
+
+func mapValue(t *testing.T, value any) map[string]any {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("value has type %T, want map[string]any", value)
+	}
+	return result
 }
 
 func TestResolveConfigFromEnvironmentsBuildsRootToLeafChain(t *testing.T) {
@@ -253,7 +263,7 @@ func TestResolveConfigFromEnvironmentsBuildsRootToLeafChain(t *testing.T) {
 	if got := []uint{resolved.Chain[0].ID, resolved.Chain[1].ID, resolved.Chain[2].ID}; !slices.Equal(got, []uint{1, 2, 3}) {
 		t.Fatalf("chain IDs = %v, want [1 2 3]", got)
 	}
-	service := resolved.Config[testService].(map[string]any)
+	service := mapValue(t, resolved.Config[testService])
 	if service[testHost] != testProd || service[testPort] != json.Number("8080") {
 		t.Fatalf("resolved service = %#v", service)
 	}

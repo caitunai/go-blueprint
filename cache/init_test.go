@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -23,7 +22,7 @@ func TestPutStringRejectsInvalidInputs(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := PutString(context.Background(), test.key, "value", test.ttl)
+			err := PutString(t.Context(), test.key, "value", test.ttl)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("PutString() error = %v, want %v", err, test.want)
 			}
@@ -35,18 +34,18 @@ func TestConcurrentInitializationReturnsOneClient(t *testing.T) {
 	Close()
 	t.Cleanup(func() {
 		Close()
-		_ = projectredis.Close()
+		if err := projectredis.Close(); err != nil {
+			t.Errorf("redis.Close() cleanup error = %v", err)
+		}
 	})
 
 	const goroutines = 50
 	clients := make(chan any, goroutines)
 	var group sync.WaitGroup
 	for range goroutines {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			clients <- GetClient()
-		}()
+		})
 	}
 	group.Wait()
 	close(clients)

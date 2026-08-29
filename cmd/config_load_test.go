@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caitunai/go-blueprint/services/configload"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/services/configload"
 )
 
 const (
@@ -56,6 +57,7 @@ func TestRootCommandLoadsPublishedConfigurationForChildCommands(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestMergePublishedConfigurationOverridesBusinessConfigAndProtectsBootstrap(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +98,11 @@ host="bootstrap-redis"
 		!target.GetBool(testConfigFeatureKey+"."+testConfigEnabledKey) {
 		t.Fatal("mergePublishedConfiguration() did not merge remote business settings")
 	}
-	if remote[testConfigFeatureKey].(map[string]any)["Enabled"] != true {
+	feature, ok := remote[testConfigFeatureKey].(map[string]any)
+	if !ok {
+		t.Fatalf("remote feature has type %T, want map[string]any", remote[testConfigFeatureKey])
+	}
+	if feature["Enabled"] != true {
 		t.Fatal("mergePublishedConfiguration() mutated the source configuration")
 	}
 }

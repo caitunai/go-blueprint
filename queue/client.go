@@ -16,10 +16,11 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-redisstream/pkg/redisstream"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/caitunai/go-blueprint/queue/job"
-	"github.com/caitunai/go-blueprint/redis"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/queue/job"
+	"github.com/caitunai/go-blueprint/redis"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 	defaultRetryInitialInterval = 250 * time.Millisecond
 	defaultRetryMaxInterval     = 2 * time.Second
 	defaultNackResendInterval   = time.Second
-	defaultSubscriberBlockTime  = time.Second
+	defaultSubscriberBlockTime  = time.Second //nolint:goconst // Redis blocking and retry intervals are independently configurable.
 	defaultDeadLetterSuffix     = "dead-letter"
 	defaultDeadLetterMaxLength  = int64(10000)
 	defaultConsumerConcurrency  = 1
@@ -37,29 +38,42 @@ const (
 	defaultClaimBatchSize       = int64(100)
 	defaultMaxIdleTime          = 5 * time.Minute
 	defaultConsumerCheck        = time.Minute
-	defaultConsumerTimeout      = 5 * time.Minute
+	defaultConsumerTimeout      = 5 * time.Minute //nolint:goconst // Consumer lifetime and idle-claim thresholds are independently configurable.
 )
 
 var (
-	publisher               *redisstream.Publisher
-	subscriber              *redisstream.Subscriber
-	clientMutex             sync.RWMutex
-	jobsMutex               sync.RWMutex
-	jobs                    = make(map[string]job.Job)
-	ErrRedisStream          = errors.New("create redis stream client failed")
-	ErrCloseRedisStream     = errors.New("close redis stream client failed")
+	publisher   *redisstream.Publisher
+	subscriber  *redisstream.Subscriber
+	clientMutex sync.RWMutex
+	jobsMutex   sync.RWMutex
+	jobs        = make(map[string]job.Job)
+	// ErrRedisStream indicates create redis stream client failed.
+	ErrRedisStream = errors.New("create redis stream client failed")
+	// ErrCloseRedisStream indicates close redis stream client failed.
+	ErrCloseRedisStream = errors.New("close redis stream client failed")
+	// ErrQueueShutdownTimeout indicates queue shutdown timeout.
 	ErrQueueShutdownTimeout = errors.New("queue shutdown timeout")
-	ErrJobHandlerNotFound   = errors.New("queue job handler not found")
-	ErrRunJob               = errors.New("run queue job failed")
-	ErrParseJob             = errors.New("parse queue job failed")
-	ErrSubscribeTopic       = errors.New("subscribe queue topic failed")
-	ErrListenerStopped      = errors.New("queue listener stopped unexpectedly")
-	ErrPublishDeadLetter    = errors.New("publish queue dead letter failed")
-	ErrJobPanic             = errors.New("queue job panicked")
-	ErrRetryCanceled        = errors.New("queue job retry canceled")
-	ErrSubscriberRunning    = errors.New("queue subscriber is already running")
+	// ErrJobHandlerNotFound indicates queue job handler not found.
+	ErrJobHandlerNotFound = errors.New("queue job handler not found")
+	// ErrRunJob indicates run queue job failed.
+	ErrRunJob = errors.New("run queue job failed")
+	// ErrParseJob indicates parse queue job failed.
+	ErrParseJob = errors.New("parse queue job failed")
+	// ErrSubscribeTopic indicates subscribe queue topic failed.
+	ErrSubscribeTopic = errors.New("subscribe queue topic failed")
+	// ErrListenerStopped indicates queue listener stopped unexpectedly.
+	ErrListenerStopped = errors.New("queue listener stopped unexpectedly")
+	// ErrPublishDeadLetter indicates publish queue dead letter failed.
+	ErrPublishDeadLetter = errors.New("publish queue dead letter failed")
+	// ErrJobPanic indicates queue job panicked.
+	ErrJobPanic = errors.New("queue job panicked")
+	// ErrRetryCanceled indicates queue job retry canceled.
+	ErrRetryCanceled = errors.New("queue job retry canceled")
+	// ErrSubscriberRunning indicates queue subscriber is already running.
+	ErrSubscriberRunning = errors.New("queue subscriber is already running")
 )
 
+// Init initializes package resources.
 func Init() error {
 	clientMutex.Lock()
 	defer clientMutex.Unlock()
@@ -88,6 +102,9 @@ func Init() error {
 	return nil
 }
 
+// Start exposes the package's start value.
+//
+//nolint:cyclop,funlen // This bounded queue state machine keeps shutdown, acknowledgement, and retry ordering explicit.
 func Start(ctx context.Context, subscriberID string) error {
 	consumer := strings.TrimSpace(viper.GetString("queue.consumer.name"))
 	if consumer == "" {
@@ -288,6 +305,7 @@ func waitForListeners(listeners *sync.WaitGroup, timeout time.Duration) error {
 	}
 }
 
+//nolint:cyclop,gocognit // This bounded queue state machine keeps shutdown, acknowledgement, and retry ordering explicit.
 func listenTopic(
 	jobCtx context.Context,
 	stop <-chan struct{},
@@ -338,12 +356,10 @@ listenLoop:
 				msg.Nack()
 				break listenLoop
 			}
-			workerGroup.Add(1)
-			go func() {
-				defer workerGroup.Done()
+			workerGroup.Go(func() {
 				defer func() { <-workers }()
 				handleMessage(jobCtx, subscription.topic, msg)
-			}()
+			})
 		}
 	}
 	workerGroup.Wait()
@@ -359,8 +375,8 @@ func handleMessage(ctx context.Context, topic string, msg *message.Message) {
 		msg.Nack()
 		return
 	}
-	if err := publishDeadLetter(ctx, topic, msg, err); err != nil {
-		log.Error().Err(err).Str("topic", topic).Str("job_id", msg.UUID).
+	if deadLetterErr := publishDeadLetter(ctx, topic, msg, err); deadLetterErr != nil {
+		log.Error().Err(deadLetterErr).Str("topic", topic).Str("job_id", msg.UUID).
 			Msg("publish dead letter failed; message remains pending")
 		msg.Nack()
 		return
@@ -368,6 +384,7 @@ func handleMessage(ctx context.Context, topic string, msg *message.Message) {
 	msg.Ack()
 }
 
+//nolint:gocognit // This bounded queue state machine keeps shutdown, acknowledgement, and retry ordering explicit.
 func dispatch(ctx context.Context, topic, name, id string, data message.Payload) (returnErr error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -410,8 +427,8 @@ func dispatch(ctx context.Context, topic, name, id string, data message.Payload)
 				Str("job_id", id).Int("attempt", attempt+1).Msg("job handler run failed")
 			return errors.Join(ErrRunJob, err)
 		}
-		if err := waitRetry(ctx, retryDelay(id, attempt)); err != nil {
-			return errors.Join(ErrRunJob, err)
+		if retryErr := waitRetry(ctx, retryDelay(id, attempt)); retryErr != nil {
+			return errors.Join(ErrRunJob, retryErr)
 		}
 	}
 	log.Info().
@@ -471,7 +488,9 @@ func retryDelay(messageID string, attempt int) time.Duration {
 		delay *= 2
 	}
 	hasher := fnv.New32a()
-	_, _ = fmt.Fprintf(hasher, "%s:%d", messageID, attempt)
+	if _, err := fmt.Fprintf(hasher, "%s:%d", messageID, attempt); err != nil {
+		return delay
+	}
 	jitterPercent := int64(80 + hasher.Sum32()%41)
 	return time.Duration(int64(delay) * jitterPercent / 100)
 }

@@ -15,14 +15,20 @@ const (
 	testEnvironment     = "production"
 	testSharedNamespace = "shared"
 	testBaseEnvironment = "base"
-	testAPIKey          = "test-api-key-value"
+	testAPIKey          = "test-api-key-value" // #nosec G101 -- non-production test fixture.
 )
+
+var errTestTargetFailure = errors.New("test target failure")
+
+func missingDatabaseResult(context.Context, string, string) (*Result, error) {
+	return nil, nil //nolint:nilnil // Deliberately simulate a loader that violates its result contract.
+}
 
 func TestLoadAllFromDatabase(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	results, err := LoadAll(context.Background(), Settings{
+	results, err := LoadAll(t.Context(), Settings{
 		Targets: []Target{{
 			Source: SourceDatabase, Namespace: testNamespace, Environment: testEnvironment,
 		}},
@@ -42,6 +48,7 @@ func TestLoadAllFromDatabase(t *testing.T) {
 	}
 }
 
+//nolint:gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestLoadAllFromHTTP(t *testing.T) {
 	t.Parallel()
 
@@ -52,15 +59,17 @@ func TestLoadAllFromHTTP(t *testing.T) {
 		if r.URL.Query().Get("format") != "json" {
 			t.Errorf("format = %q", r.URL.Query().Get("format"))
 		}
-		if r.Header.Get("X-API-Key") != testAPIKey {
+		if r.Header.Get("X-Api-Key") != testAPIKey {
 			t.Error("request API Key does not match")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":0,"message":"ok","data":{"version":7,"config":{"port":8080,"ratio":1.5}}}`))
+		if _, err := w.Write([]byte(`{"status":0,"message":"ok","data":{"version":7,"config":{"port":8080,"ratio":1.5}}}`)); err != nil {
+			t.Errorf("response write error = %v", err)
+		}
 	}))
 	defer server.Close()
 
-	results, err := LoadAll(context.Background(), validHTTPSettings(server.URL), nil)
+	results, err := LoadAll(t.Context(), validHTTPSettings(server.URL), nil)
 	if err != nil {
 		t.Fatalf("LoadAll() error = %v", err)
 	}
@@ -82,7 +91,7 @@ func TestLoadAllFromDatabasePreservesTargetOrder(t *testing.T) {
 		{Source: SourceDatabase, Namespace: testNamespace, Environment: "region-cn"},
 	}
 	loaded := make([]string, 0, len(targets))
-	results, err := LoadAll(context.Background(), Settings{
+	results, err := LoadAll(t.Context(), Settings{
 		Targets: targets,
 	}, func(_ context.Context, namespace, environment string) (*Result, error) {
 		loaded = append(loaded, namespace+"/"+environment)
@@ -115,15 +124,17 @@ func TestLoadAllFromHTTPUsesTargetAPIKeys(t *testing.T) {
 		if !exists {
 			t.Errorf("unexpected request path = %q", r.URL.Path)
 		}
-		if r.Header.Get("X-API-Key") != expectedKey {
+		if r.Header.Get("X-Api-Key") != expectedKey {
 			t.Errorf("request API Key for %s does not match", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":0,"message":"ok","data":{"version":1,"config":{"enabled":true}}}`))
+		if _, err := w.Write([]byte(`{"status":0,"message":"ok","data":{"version":1,"config":{"enabled":true}}}`)); err != nil {
+			t.Errorf("response write error = %v", err)
+		}
 	}))
 	defer server.Close()
 
-	results, err := LoadAll(context.Background(), Settings{
+	results, err := LoadAll(t.Context(), Settings{
 		Targets: []Target{
 			{
 				Source: SourceHTTP, Namespace: testSharedNamespace, Environment: testBaseEnvironment,
@@ -143,6 +154,7 @@ func TestLoadAllFromHTTPUsesTargetAPIKeys(t *testing.T) {
 	}
 }
 
+//nolint:cyclop,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestLoadAllSupportsMixedSourcesAndIndependentHTTPServers(t *testing.T) {
 	t.Parallel()
 
@@ -151,11 +163,13 @@ func TestLoadAllSupportsMixedSourcesAndIndependentHTTPServers(t *testing.T) {
 			if r.URL.Path != expectedPath {
 				t.Errorf("request path = %q, want %q", r.URL.Path, expectedPath)
 			}
-			if r.Header.Get("X-API-Key") != expectedAPIKey {
+			if r.Header.Get("X-Api-Key") != expectedAPIKey {
 				t.Errorf("request API Key for %s does not match", origin)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":0,"message":"ok","data":{"version":2,"config":{"origin":"` + origin + `"}}}`))
+			if _, err := w.Write([]byte(`{"status":0,"message":"ok","data":{"version":2,"config":{"origin":"` + origin + `"}}}`)); err != nil {
+				t.Errorf("response write error = %v", err)
+			}
 		}))
 	}
 	primaryServer := newServer(
@@ -171,7 +185,7 @@ func TestLoadAllSupportsMixedSourcesAndIndependentHTTPServers(t *testing.T) {
 	)
 	defer backupServer.Close()
 
-	results, err := LoadAll(context.Background(), Settings{
+	results, err := LoadAll(t.Context(), Settings{
 		Targets: []Target{
 			{Source: SourceDatabase, Namespace: testSharedNamespace, Environment: testBaseEnvironment},
 			{
@@ -207,7 +221,7 @@ func TestLoadAllFromHTTPRejectsErrorStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := LoadAll(context.Background(), validHTTPSettings(server.URL), nil)
+	_, err := LoadAll(t.Context(), validHTTPSettings(server.URL), nil)
 	if !errors.Is(err, ErrHTTP) {
 		t.Fatalf("LoadAll() error = %v, want ErrHTTP", err)
 	}
@@ -217,6 +231,7 @@ func TestLoadAllFromHTTPRejectsErrorStatus(t *testing.T) {
 	}
 }
 
+//nolint:funlen // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestLoadAllRejectsInvalidSettingsAndResults(t *testing.T) {
 	t.Parallel()
 
@@ -265,7 +280,7 @@ func TestLoadAllRejectsInvalidSettingsAndResults(t *testing.T) {
 					Source: SourceDatabase, Namespace: testNamespace, Environment: testEnvironment,
 				}},
 			},
-			loader:  func(context.Context, string, string) (*Result, error) { return nil, nil },
+			loader:  missingDatabaseResult,
 			wantErr: ErrInvalidResponse,
 		},
 	}
@@ -273,7 +288,7 @@ func TestLoadAllRejectsInvalidSettingsAndResults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := LoadAll(context.Background(), tt.settings, tt.loader)
+			_, err := LoadAll(t.Context(), tt.settings, tt.loader)
 			if !errors.Is(err, ErrLoad) || !errors.Is(err, tt.wantErr) {
 				t.Fatalf("LoadAll() error = %v, want %v", err, tt.wantErr)
 			}
@@ -287,12 +302,12 @@ func TestLoadAllRejectsMissingAndDuplicateTargets(t *testing.T) {
 	loader := func(context.Context, string, string) (*Result, error) {
 		return &Result{Config: map[string]any{}}, nil
 	}
-	_, err := LoadAll(context.Background(), Settings{}, loader)
+	_, err := LoadAll(t.Context(), Settings{}, loader)
 	if !errors.Is(err, ErrTargetsRequired) {
 		t.Fatalf("LoadAll() missing-target error = %v", err)
 	}
 
-	_, err = LoadAll(context.Background(), Settings{
+	_, err = LoadAll(t.Context(), Settings{
 		Targets: []Target{
 			{Source: SourceDatabase, Namespace: testNamespace, Environment: testEnvironment},
 			{Source: " DATABASE ", Namespace: " SERVICE ", Environment: "Production"},
@@ -310,8 +325,8 @@ func TestLoadAllRejectsMissingAndDuplicateTargets(t *testing.T) {
 func TestLoadAllReturnsTargetMetadataOnFailure(t *testing.T) {
 	t.Parallel()
 
-	loadError := errors.New("test target failure")
-	_, err := LoadAll(context.Background(), Settings{
+	loadError := errTestTargetFailure
+	_, err := LoadAll(t.Context(), Settings{
 		Targets: []Target{
 			{Source: SourceDatabase, Namespace: testSharedNamespace, Environment: testBaseEnvironment},
 			{Source: SourceDatabase, Namespace: testNamespace, Environment: testEnvironment},

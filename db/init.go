@@ -1,4 +1,4 @@
-// Package db
+// Package db provides database models and persistence operations.
 package db
 
 import (
@@ -15,11 +15,15 @@ import (
 )
 
 var (
-	db                 *gorm.DB
-	dbMutex            sync.Mutex
+	db      *gorm.DB
+	dbMutex sync.Mutex
+	// ErrCloseConnection indicates close database connection failed.
 	ErrCloseConnection = errors.New("close database connection failed")
 )
 
+// Conn exposes the package's conn value.
+//
+//nolint:cyclop // This bounded database lifecycle keeps pool ownership and query classification explicit.
 func Conn() *gorm.DB {
 	dbMutex.Lock()
 
@@ -68,6 +72,7 @@ func Conn() *gorm.DB {
 	return database
 }
 
+// DB performs the db operation.
 func DB() *gorm.DB {
 	return Conn()
 }
@@ -87,8 +92,8 @@ func Close() error {
 	if err != nil {
 		return errors.Join(ErrCloseConnection, err)
 	}
-	if err := sqlDB.Close(); err != nil {
-		return errors.Join(ErrCloseConnection, err)
+	if closeErr := sqlDB.Close(); closeErr != nil {
+		return errors.Join(ErrCloseConnection, closeErr)
 	}
 	return nil
 }

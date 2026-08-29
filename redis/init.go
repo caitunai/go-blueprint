@@ -13,11 +13,14 @@ import (
 )
 
 var (
-	rdb                *redis.Client
-	rdbMutex           sync.Mutex
+	rdb      *redis.Client
+	rdbMutex sync.Mutex
+	// ErrCloseConnection indicates close redis connection failed.
 	ErrCloseConnection = errors.New("close redis connection failed")
-	ErrConnect         = errors.New("connect redis failed")
-	ErrInvalidConfig   = errors.New("invalid redis configuration")
+	// ErrConnect indicates connect redis failed.
+	ErrConnect = errors.New("connect redis failed")
+	// ErrInvalidConfig indicates invalid redis configuration.
+	ErrInvalidConfig = errors.New("invalid redis configuration")
 )
 
 type borrowedClient struct {
@@ -29,6 +32,7 @@ func (borrowedClient) Close() error {
 	return nil
 }
 
+// Init initializes package resources.
 func Init(ctx context.Context) error {
 	rdbMutex.Lock()
 	if rdb == nil {
@@ -85,6 +89,7 @@ func newClient() *redis.Client {
 	return redis.NewClient(options)
 }
 
+// GetClient returns client.
 func GetClient() *redis.Client {
 	rdbMutex.Lock()
 	defer rdbMutex.Unlock()

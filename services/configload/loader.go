@@ -17,32 +17,49 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+// Source represents source data.
 type Source string
 
 const (
+	// SourceDatabase identifies the "database" value.
 	SourceDatabase Source = "database"
+	// SourceHTTP identifies the "http" value.
 	SourceHTTP     Source = "http"
 	maxHTTPBody           = 2 * 1024 * 1024
 	maxHTTPTimeout        = time.Minute
 )
 
 var (
-	ErrLoad               = errors.New("load published configuration failed")
-	ErrInvalidSettings    = errors.New("invalid published configuration loader settings")
-	ErrTargetsRequired    = errors.New("configload.targets must contain at least one target")
-	ErrTargetDuplicate    = errors.New("configload.targets contains a duplicate source endpoint, namespace, and environment")
-	ErrNamespaceInvalid   = errors.New("configload target namespace must be a valid namespace identifier")
+	// ErrLoad indicates load published configuration failed.
+	ErrLoad = errors.New("load published configuration failed")
+	// ErrInvalidSettings indicates invalid published configuration loader settings.
+	ErrInvalidSettings = errors.New("invalid published configuration loader settings")
+	// ErrTargetsRequired indicates configload.targets must contain at least one target.
+	ErrTargetsRequired = errors.New("configload.targets must contain at least one target")
+	// ErrTargetDuplicate indicates configload.targets contains a duplicate source endpoint, namespace, and environment.
+	ErrTargetDuplicate = errors.New("configload.targets contains a duplicate source endpoint, namespace, and environment")
+	// ErrNamespaceInvalid indicates configload target namespace must be a valid namespace identifier.
+	ErrNamespaceInvalid = errors.New("configload target namespace must be a valid namespace identifier")
+	// ErrEnvironmentInvalid indicates configload target environment must be a valid environment identifier.
 	ErrEnvironmentInvalid = errors.New("configload target environment must be a valid environment identifier")
-	ErrUnsupportedSource  = errors.New("every configload target source must be database or http")
+	// ErrUnsupportedSource indicates every configload target source must be database or http.
+	ErrUnsupportedSource = errors.New("every configload target source must be database or http")
+	// ErrHTTPBaseURLInvalid indicates HTTP target baseURL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment.
 	ErrHTTPBaseURLInvalid = errors.New("HTTP target baseURL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment")
+	// ErrHTTPAPIKeyRequired indicates an API key is required for every HTTP configload target.
 	ErrHTTPAPIKeyRequired = errors.New("an API key is required for every HTTP configload target")
+	// ErrHTTPTimeoutInvalid indicates HTTP target timeout must be greater than zero and at most one minute.
 	ErrHTTPTimeoutInvalid = errors.New("HTTP target timeout must be greater than zero and at most one minute")
-	ErrDatabaseLoader     = errors.New("database configuration loader is unavailable")
-	ErrHTTP               = errors.New("published configuration HTTP request failed")
-	ErrInvalidResponse    = errors.New("invalid published configuration response")
-	configSlugPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	// ErrDatabaseLoader indicates database configuration loader is unavailable.
+	ErrDatabaseLoader = errors.New("database configuration loader is unavailable")
+	// ErrHTTP indicates published configuration HTTP request failed.
+	ErrHTTP = errors.New("published configuration HTTP request failed")
+	// ErrInvalidResponse indicates invalid published configuration response.
+	ErrInvalidResponse = errors.New("invalid published configuration response")
+	configSlugPattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 )
 
+// Settings represents settings data.
 type Settings struct {
 	Targets []Target
 }
@@ -57,6 +74,7 @@ type Target struct {
 	HTTP        HTTPSettings `mapstructure:"http"`
 }
 
+// HTTPSettings represents http settings data.
 type HTTPSettings struct {
 	BaseURL   string        `mapstructure:"baseURL"`
 	APIKey    string        `mapstructure:"-"`
@@ -64,6 +82,7 @@ type HTTPSettings struct {
 	Timeout   time.Duration `mapstructure:"timeout"`
 }
 
+// Result represents result data.
 type Result struct {
 	Config      map[string]any
 	Source      Source
@@ -72,12 +91,15 @@ type Result struct {
 	Version     uint64
 }
 
+// DatabaseLoader represents database loader data.
 type DatabaseLoader func(context.Context, string, string) (*Result, error)
 
+// HTTPStatusError represents http status error data.
 type HTTPStatusError struct {
 	StatusCode int
 }
 
+// TargetError represents target error data.
 type TargetError struct {
 	Err         error
 	Source      Source
@@ -191,12 +213,17 @@ func validateHTTPSettings(settings HTTPSettings) error {
 		return ErrHTTPTimeoutInvalid
 	}
 	baseURL, err := url.Parse(settings.BaseURL)
-	if err != nil || baseURL.Host == "" || baseURL.User != nil ||
-		(baseURL.Scheme != "http" && baseURL.Scheme != "https") ||
-		baseURL.RawQuery != "" || baseURL.Fragment != "" {
+	if err != nil || !validHTTPBaseURL(baseURL) {
 		return ErrHTTPBaseURLInvalid
 	}
 	return nil
+}
+
+func validHTTPBaseURL(baseURL *url.URL) bool {
+	if baseURL.Host == "" || baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
+		return false
+	}
+	return baseURL.Scheme == "http" || baseURL.Scheme == "https"
 }
 
 func targetIdentity(target Target) string {

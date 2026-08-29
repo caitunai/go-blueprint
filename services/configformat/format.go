@@ -11,21 +11,30 @@ import (
 	"unicode"
 )
 
+// Format represents format data.
 type Format string
 
 const (
+	// JSON identifies the "json" value.
 	JSON Format = "json"
+	// YAML identifies the "yaml" value.
 	YAML Format = "yaml"
+	// TOML identifies the "toml" value.
 	TOML Format = "toml"
-	ENV  Format = "env"
-	INI  Format = "ini"
+	// ENV identifies the "env" value.
+	ENV Format = "env"
+	// INI identifies the "ini" value.
+	INI Format = "ini"
 )
 
 var (
+	// ErrUnsupportedFormat indicates unsupported configuration output format.
 	ErrUnsupportedFormat = errors.New("unsupported configuration output format")
-	ErrFormatConfig      = errors.New("format configuration output failed")
+	// ErrFormatConfig indicates format configuration output failed.
+	ErrFormatConfig = errors.New("format configuration output failed")
 )
 
+// Parse performs the parse operation.
 func Parse(value string) (Format, error) {
 	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
 	switch normalized {
@@ -44,8 +53,11 @@ func Parse(value string) (Format, error) {
 	}
 }
 
+// ContentType performs the content type operation.
 func (format Format) ContentType() string {
 	switch format {
+	case JSON:
+		return "application/json; charset=utf-8"
 	case YAML:
 		return "application/yaml; charset=utf-8"
 	case TOML:
@@ -53,10 +65,11 @@ func (format Format) ContentType() string {
 	case ENV, INI:
 		return "text/plain; charset=utf-8"
 	default:
-		return "application/json; charset=utf-8"
+		return "application/octet-stream"
 	}
 }
 
+// Extension performs the extension operation.
 func (format Format) Extension() string {
 	if format == "" {
 		return string(JSON)
@@ -105,40 +118,14 @@ func renderYAML(config map[string]any, descriptions map[string]string) ([]byte, 
 func yamlObject(object map[string]any, descriptions map[string]string, path []any, indent int) ([]string, error) {
 	lines := make([]string, 0, len(object))
 	for _, key := range sortedKeys(object) {
-		value := object[key]
 		childPath := appendPath(path, key)
 		lines = appendDescription(lines, descriptions[pathToPointer(childPath)], indent, "# ")
 		prefix := strings.Repeat(" ", indent) + yamlKey(key) + ":"
-		switch typed := value.(type) {
-		case map[string]any:
-			if len(typed) == 0 {
-				lines = append(lines, prefix+" {}")
-				continue
-			}
-			lines = append(lines, prefix)
-			children, err := yamlObject(typed, descriptions, childPath, indent+2)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, children...)
-		case []any:
-			if len(typed) == 0 {
-				lines = append(lines, prefix+" []")
-				continue
-			}
-			lines = append(lines, prefix)
-			children, err := yamlArray(typed, descriptions, childPath, indent+2)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, children...)
-		default:
-			scalar, err := scalarValue(value)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, prefix+" "+scalar)
+		valueLines, err := yamlValue(object[key], descriptions, childPath, indent, prefix)
+		if err != nil {
+			return nil, err
 		}
+		lines = append(lines, valueLines...)
 	}
 	return lines, nil
 }
@@ -149,38 +136,36 @@ func yamlArray(array []any, descriptions map[string]string, path []any, indent i
 		childPath := appendPath(path, index)
 		lines = appendDescription(lines, descriptions[pathToPointer(childPath)], indent, "# ")
 		prefix := strings.Repeat(" ", indent) + "-"
-		switch typed := value.(type) {
-		case map[string]any:
-			if len(typed) == 0 {
-				lines = append(lines, prefix+" {}")
-				continue
-			}
-			lines = append(lines, prefix)
-			children, err := yamlObject(typed, descriptions, childPath, indent+2)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, children...)
-		case []any:
-			if len(typed) == 0 {
-				lines = append(lines, prefix+" []")
-				continue
-			}
-			lines = append(lines, prefix)
-			children, err := yamlArray(typed, descriptions, childPath, indent+2)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, children...)
-		default:
-			scalar, err := scalarValue(value)
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, prefix+" "+scalar)
+		valueLines, err := yamlValue(value, descriptions, childPath, indent, prefix)
+		if err != nil {
+			return nil, err
 		}
+		lines = append(lines, valueLines...)
 	}
 	return lines, nil
+}
+
+func yamlValue(value any, descriptions map[string]string, path []any, indent int, prefix string) ([]string, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return []string{prefix + " {}"}, nil
+		}
+		children, err := yamlObject(typed, descriptions, path, indent+2)
+		return append([]string{prefix}, children...), err
+	case []any:
+		if len(typed) == 0 {
+			return []string{prefix + " []"}, nil
+		}
+		children, err := yamlArray(typed, descriptions, path, indent+2)
+		return append([]string{prefix}, children...), err
+	default:
+		scalar, err := scalarValue(value)
+		if err != nil {
+			return nil, err
+		}
+		return []string{prefix + " " + scalar}, nil
+	}
 }
 
 func renderTOML(config map[string]any, descriptions map[string]string) ([]byte, error) {
@@ -192,6 +177,7 @@ func renderTOML(config map[string]any, descriptions map[string]string) ([]byte, 
 	return linesBytes(formatted), nil
 }
 
+//nolint:gocognit // This bounded format or protocol state machine keeps type handling and error exits explicit.
 func appendTOMLTable(lines []string, object map[string]any, path []string) ([]string, error) {
 	if len(path) > 0 {
 		lines = appendBlankLine(lines)
@@ -226,6 +212,7 @@ func appendTOMLTable(lines []string, object map[string]any, path []string) ([]st
 	return lines, nil
 }
 
+//nolint:gocognit // This bounded format or protocol state machine keeps type handling and error exits explicit.
 func tomlValue(value any) (string, error) {
 	switch typed := value.(type) {
 	case []any:
@@ -266,6 +253,7 @@ func renderENV(config map[string]any, descriptions map[string]string) ([]byte, e
 	return linesBytes(lines), nil
 }
 
+//nolint:gocognit // This bounded format or protocol state machine keeps type handling and error exits explicit.
 func renderINI(config map[string]any, descriptions map[string]string) ([]byte, error) {
 	lines := descriptionIndex(descriptions, "; ")
 	for _, key := range sortedKeys(config) {
@@ -333,13 +321,7 @@ func scalarValue(value any) (string, error) {
 		}
 		return string(raw), nil
 	case json.Number:
-		if _, err := typed.Int64(); err == nil {
-			return typed.String(), nil
-		}
-		if _, err := typed.Float64(); err != nil {
-			return "", errors.Join(ErrFormatConfig, err)
-		}
-		return typed.String(), nil
+		return scalarJSONNumber(typed)
 	case bool:
 		return strconv.FormatBool(typed), nil
 	case int:
@@ -351,6 +333,16 @@ func scalarValue(value any) (string, error) {
 	default:
 		return "", ErrFormatConfig
 	}
+}
+
+func scalarJSONNumber(value json.Number) (string, error) {
+	if _, err := value.Int64(); err == nil {
+		return value.String(), nil
+	}
+	if _, err := value.Float64(); err != nil {
+		return "", errors.Join(ErrFormatConfig, err)
+	}
+	return value.String(), nil
 }
 
 func yamlKey(key string) string {
@@ -388,17 +380,21 @@ func isBareTOMLKey(value string) bool {
 func envKey(path []any) string {
 	parts := make([]string, len(path))
 	for index, segment := range path {
-		var builder strings.Builder
+		normalized := make([]rune, 0, len(toString(segment)))
 		for _, current := range toString(segment) {
-			if current >= 'a' && current <= 'z' || current >= 'A' && current <= 'Z' || current >= '0' && current <= '9' {
-				builder.WriteRune(unicode.ToUpper(current))
+			if isASCIIAlphaNumeric(current) {
+				normalized = append(normalized, unicode.ToUpper(current))
 			} else {
-				builder.WriteByte('_')
+				normalized = append(normalized, '_')
 			}
 		}
-		parts[index] = builder.String()
+		parts[index] = string(normalized)
 	}
 	return strings.Join(parts, "__")
+}
+
+func isASCIIAlphaNumeric(value rune) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 func descriptionIndex(descriptions map[string]string, marker string) []string {
@@ -431,13 +427,15 @@ func appendDescription(lines []string, description string, indent int, marker st
 }
 
 func pathToPointer(path []any) string {
-	var builder strings.Builder
-	for _, segment := range path {
-		builder.WriteByte('/')
-		value := strings.ReplaceAll(toString(segment), "~", "~0")
-		builder.WriteString(strings.ReplaceAll(value, "/", "~1"))
+	if len(path) == 0 {
+		return ""
 	}
-	return builder.String()
+	parts := make([]string, len(path))
+	for index, segment := range path {
+		value := strings.ReplaceAll(toString(segment), "~", "~0")
+		parts[index] = strings.ReplaceAll(value, "/", "~1")
+	}
+	return "/" + strings.Join(parts, "/")
 }
 
 func joinPath(path []any, separator string) string {

@@ -6,17 +6,23 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/caitunai/go-blueprint/queue/job"
 	"github.com/spf13/viper"
+
+	"github.com/caitunai/go-blueprint/queue/job"
 )
 
 var (
+	// ErrPublishTopicMessage indicates publish message to topic failed.
 	ErrPublishTopicMessage = errors.New("publish message to topic failed")
-	ErrPublisherNotReady   = errors.New("queue publisher is not initialized")
-	ErrEncodeJob           = errors.New("encode queue job failed")
-	ErrInvalidJob          = errors.New("queue job is nil")
+	// ErrPublisherNotReady indicates queue publisher is not initialized.
+	ErrPublisherNotReady = errors.New("queue publisher is not initialized")
+	// ErrEncodeJob indicates encode queue job failed.
+	ErrEncodeJob = errors.New("encode queue job failed")
+	// ErrInvalidJob indicates queue job is nil.
+	ErrInvalidJob = errors.New("queue job is nil")
 )
 
+// Publish performs the publish operation.
 func Publish(ctx context.Context, j job.Job) error {
 	if j == nil {
 		return errors.Join(ErrPublishTopicMessage, ErrInvalidJob)

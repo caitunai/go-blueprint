@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/storage"
-	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -15,6 +16,7 @@ var (
 	assetFileServer      = http.StripPrefix("/assets/", http.FileServer(http.FS(storage.Assets)))
 )
 
+// ServeRootStaticFiles performs the serve root static files operation.
 func ServeRootStaticFiles(c *base.Context) {
 	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 		c.NotFound("resource not found", gin.H{})
@@ -34,6 +36,7 @@ func ServeRootStaticFiles(c *base.Context) {
 	rootStaticFileServer.ServeHTTP(c.Writer, c.Request)
 }
 
+// ServeAssetFile performs the serve asset file operation.
 func ServeAssetFile(c *base.Context) {
 	filepath := strings.TrimPrefix(c.Param("filepath"), "/")
 	if filepath == "" || !fs.ValidPath(filepath) {

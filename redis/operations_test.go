@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 )
 
 func TestOperationsRejectInvalidInputsBeforeRedisCall(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tests := []struct {
 		want error
 		run  func() error

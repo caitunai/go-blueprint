@@ -10,7 +10,7 @@ import (
 )
 
 func TestManagerEncryptDecryptAndAuthenticateContext(t *testing.T) {
-	manager, _ := testManager(t, "key-v1")
+	manager := testManager(t, "key-v1")
 	plaintext := []byte(`{"database":{"password":"secret"}}`)
 	context := "namespace=1|environment=2|version=0|kind=draft-config"
 
@@ -33,11 +33,12 @@ func TestManagerEncryptDecryptAndAuthenticateContext(t *testing.T) {
 	if !encrypted || string(decrypted) != string(plaintext) {
 		t.Fatalf("Decrypt() = %q, %t", decrypted, encrypted)
 	}
-	if _, _, err := manager.Decrypt(first, context+"-changed"); !errors.Is(err, ErrDecrypt) {
-		t.Fatalf("Decrypt() context error = %v, want ErrDecrypt", err)
+	if _, _, operationErr := manager.Decrypt(first, context+"-changed"); !errors.Is(operationErr, ErrDecrypt) {
+		t.Fatalf("Decrypt() context error = %v, want ErrDecrypt", operationErr)
 	}
 }
 
+//nolint:cyclop,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestManagerReencryptWrapsExistingDataKeyWithActiveKey(t *testing.T) {
 	directory := t.TempDir()
 	keyringPath := filepath.Join(directory, "keys.json")
@@ -58,8 +59,8 @@ func TestManagerReencryptWrapsExistingDataKeyWithActiveKey(t *testing.T) {
 		t.Fatalf("parseEnvelope() error = %v", err)
 	}
 
-	if err := GenerateFileKey(keyringPath, "key-new"); err != nil {
-		t.Fatalf("GenerateFileKey() new error = %v", err)
+	if operationErr := GenerateFileKey(keyringPath, "key-new"); operationErr != nil {
+		t.Fatalf("GenerateFileKey() new error = %v", operationErr)
 	}
 	newManager, err := NewManager(Settings{Enabled: true, Provider: ProviderFile, ActiveKeyID: "key-new", KeyringPath: keyringPath})
 	if err != nil {
@@ -83,13 +84,13 @@ func TestManagerReencryptWrapsExistingDataKeyWithActiveKey(t *testing.T) {
 	if err != nil || string(decrypted) != `{"token":"value"}` {
 		t.Fatalf("Decrypt() rotated = %q, %v", decrypted, err)
 	}
-	if _, _, err := oldManager.Decrypt(updated, context); !errors.Is(err, ErrKeyNotFound) {
-		t.Fatalf("Decrypt() with old keyring error = %v, want ErrKeyNotFound", err)
+	if _, _, operationErr := oldManager.Decrypt(updated, context); !errors.Is(operationErr, ErrKeyNotFound) {
+		t.Fatalf("Decrypt() with old keyring error = %v, want ErrKeyNotFound", operationErr)
 	}
 }
 
 func TestManagerReencryptsLegacyPlaintextAndRejectsTampering(t *testing.T) {
-	manager, _ := testManager(t, "key-v1")
+	manager := testManager(t, "key-v1")
 	context := "namespace=1|environment=1|version=0|kind=draft-config"
 	updated, changed, err := manager.Reencrypt(`{"legacy":true}`, context)
 	if err != nil || !changed {
@@ -101,8 +102,8 @@ func TestManagerReencryptsLegacyPlaintextAndRejectsTampering(t *testing.T) {
 	}
 
 	tampered := updated[:len(updated)-1] + "A"
-	if _, _, err := manager.Decrypt(tampered, context); !errors.Is(err, ErrDecrypt) {
-		t.Fatalf("Decrypt() tampered error = %v, want ErrDecrypt", err)
+	if _, _, operationErr := manager.Decrypt(tampered, context); !errors.Is(operationErr, ErrDecrypt) {
+		t.Fatalf("Decrypt() tampered error = %v, want ErrDecrypt", operationErr)
 	}
 }
 
@@ -120,16 +121,17 @@ func TestDisabledManagerPassesPlaintextButRejectsCiphertext(t *testing.T) {
 		t.Fatalf("Decrypt() disabled plaintext = %q, %t, %v", plaintext, encrypted, err)
 	}
 
-	enabled, _ := testManager(t, "key-v1")
+	enabled := testManager(t, "key-v1")
 	ciphertext, err := enabled.Encrypt([]byte("secret"), "context")
 	if err != nil {
 		t.Fatalf("Encrypt() enabled error = %v", err)
 	}
-	if _, _, err := disabled.Decrypt(ciphertext, "context"); !errors.Is(err, ErrDisabled) {
-		t.Fatalf("Decrypt() disabled ciphertext error = %v, want ErrDisabled", err)
+	if _, _, operationErr := disabled.Decrypt(ciphertext, "context"); !errors.Is(operationErr, ErrDisabled) {
+		t.Fatalf("Decrypt() disabled ciphertext error = %v, want ErrDisabled", operationErr)
 	}
 }
 
+//nolint:cyclop,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
 func TestGenerateFileKeyUsesRestrictedPermissionsAndPreservesKeys(t *testing.T) {
 	keyringPath := filepath.Join(t.TempDir(), "keys.json")
 	if err := GenerateFileKey(keyringPath, "key-one"); err != nil {
@@ -154,8 +156,8 @@ func TestGenerateFileKeyUsesRestrictedPermissionsAndPreservesKeys(t *testing.T) 
 	if len(keys) != 2 || len(keys["key-one"]) != keyBytes || len(keys["key-two"]) != keyBytes {
 		t.Fatalf("loadFileKeys() keys = %#v", keys)
 	}
-	if err := GenerateFileKey(keyringPath, "key-one"); !errors.Is(err, ErrKeyAlreadyExists) {
-		t.Fatalf("GenerateFileKey() duplicate error = %v, want ErrKeyAlreadyExists", err)
+	if operationErr := GenerateFileKey(keyringPath, "key-one"); !errors.Is(operationErr, ErrKeyAlreadyExists) {
+		t.Fatalf("GenerateFileKey() duplicate error = %v, want ErrKeyAlreadyExists", operationErr)
 	}
 }
 
@@ -167,7 +169,7 @@ func TestNewManagerRejectsInsecureKeyringPermissions(t *testing.T) {
 	if err := GenerateFileKey(keyringPath, "key-v1"); err != nil {
 		t.Fatalf("GenerateFileKey() error = %v", err)
 	}
-	if err := os.Chmod(keyringPath, 0o644); err != nil {
+	if err := os.Chmod(keyringPath, 0o644); err != nil { // #nosec G302 -- this test intentionally creates insecure permissions.
 		t.Fatalf("Chmod() error = %v", err)
 	}
 	_, err := NewManager(Settings{Enabled: true, Provider: ProviderFile, ActiveKeyID: "key-v1", KeyringPath: keyringPath})
@@ -176,7 +178,7 @@ func TestNewManagerRejectsInsecureKeyringPermissions(t *testing.T) {
 	}
 }
 
-func testManager(t *testing.T, keyID string) (*Manager, string) {
+func testManager(t *testing.T, keyID string) *Manager {
 	t.Helper()
 	keyringPath := filepath.Join(t.TempDir(), "keys.json")
 	if err := GenerateFileKey(keyringPath, keyID); err != nil {
@@ -186,5 +188,5 @@ func testManager(t *testing.T, keyID string) (*Manager, string) {
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
-	return manager, keyringPath
+	return manager
 }

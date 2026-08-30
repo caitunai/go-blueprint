@@ -341,15 +341,93 @@ DB_PROD_PORT="3306"
 DB_PROD_NAME="productiondb"
 ```
 
-### Load `.env` in your shell
+### Automatically load `.env` for Atlas
 
-For **bash/zsh**:
+The repository provides `scripts/atlas-env.sh`, a portable wrapper for Zsh,
+Bash, and POSIX `sh`. The script is project-independent: it searches upward
+from the current directory for the nearest `atlas.hcl`, loads the `.env` beside
+it in an isolated subshell, and then calls the installed Atlas executable with
+the original arguments. The loaded values do not remain in the interactive
+shell after Atlas exits.
+
+Install one user-level copy from the repository root. The command respects
+`XDG_CONFIG_HOME` and otherwise installs to `~/.config/atlas/`. The directory
+is private to the user (`0700`), and the sourced script is readable and
+writable only by the user (`0600`):
+
+```sh
+install -d -m 0700 "${XDG_CONFIG_HOME:-$HOME/.config}/atlas"
+install -m 0600 scripts/atlas-env.sh \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/atlas/atlas-env.sh"
+```
+
+The installed file intentionally has no executable bit because shell startup
+files load it with `source` or the POSIX dot command.
+
+Do not reference the script inside each project from a shell startup file.
+Load the single user-level copy once for each shell you use. After it is
+loaded, the command name remains `atlas` in every Atlas project.
+
+For **Zsh**, copy this line into `~/.zshrc`:
+
+```zsh
+source "${XDG_CONFIG_HOME:-$HOME/.config}/atlas/atlas-env.sh"
+```
+
+Then reload the configuration:
+
+```zsh
+source ~/.zshrc
+```
+
+For **Bash**, copy the same line into `~/.bashrc`, or into `~/.bash_aliases` if
+that file is already loaded by `~/.bashrc`:
 
 ```bash
-# Automatically export all variables in .env
-set -a
-source .env
-set +a
+source "${XDG_CONFIG_HOME:-$HOME/.config}/atlas/atlas-env.sh"
+```
+
+Then reload the selected file, for example:
+
+```bash
+source ~/.bashrc
+```
+
+For a POSIX-compatible **sh**, use the dot command in `~/.profile` or the
+startup file referenced by the shell's `ENV` variable:
+
+```sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/atlas/atlas-env.sh"
+```
+
+Start a new shell or reload its startup file, then verify that `atlas` resolves
+to a function and still invokes the installed executable:
+
+```bash
+type atlas
+atlas version
+```
+
+All Atlas subcommands keep their original syntax:
+
+```bash
+atlas migrate diff create_users --env local
+atlas migrate apply --env local
+atlas schema inspect --env local
+```
+
+The wrapper uses the shell's `source`/dot behavior, so `.env` must be a trusted
+developer-maintained file. Do not copy an untrusted or remotely supplied file
+to the project `.env`. If no matching `atlas.hcl` or `.env` is found, the
+wrapper calls the installed Atlas executable without loading a file.
+
+To update the user-level wrapper after pulling a newer version of this
+repository, install the file again. This also restores the intended `0600`
+permission if it changed:
+
+```sh
+install -m 0600 scripts/atlas-env.sh \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/atlas/atlas-env.sh"
 ```
 
 ### Synchronize the Atlas table prefix before generating migrations

@@ -21,7 +21,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/api/base"
 	"github.com/caitunai/go-blueprint/api/route"
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 // Server represents server data.
@@ -74,8 +74,8 @@ func (s *Server) Start(ctx context.Context) {
 	log.Info().Msg("Server exiting")
 }
 
-func startServerTask(ctx context.Context, task safe.Task) {
-	safe.Go(ctx, httpServerTaskName, task)
+func startServerTask(ctx context.Context, task xutil.Task) {
+	xutil.Go(ctx, httpServerTaskName, task)
 }
 
 func (s *Server) newRouter() *gin.Engine {

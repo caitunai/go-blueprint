@@ -21,7 +21,7 @@ import (
 
 	"github.com/caitunai/go-blueprint/queue/job"
 	"github.com/caitunai/go-blueprint/redis"
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 const (
@@ -160,7 +160,7 @@ func Start(ctx context.Context, subscriberID string) error {
 		return errors.Join(err, Close())
 	}
 	stopConsuming := make(chan struct{})
-	listeners := safe.WaitGroup("queue_listeners")
+	listeners := xutil.WaitGroup("queue_listeners")
 	listenerErrs := make(chan error, len(subscriptions))
 	for _, subscription := range subscriptions {
 		listeners.Go(jobCtx, func(listenerContext context.Context) {
@@ -291,9 +291,9 @@ func consumerConcurrency() int {
 	return concurrency
 }
 
-func waitForListeners(ctx context.Context, listeners *safe.Group, timeout time.Duration) error {
+func waitForListeners(ctx context.Context, listeners *xutil.Group, timeout time.Duration) error {
 	done := make(chan struct{})
-	safe.Go(ctx, "queue_listener_waiter", func(context.Context) {
+	xutil.Go(ctx, "queue_listener_waiter", func(context.Context) {
 		listeners.Wait()
 		close(done)
 	})
@@ -332,7 +332,7 @@ func listenTopic(
 		Str("prefix", viper.GetString("queue.prefix")).
 		Msg("subscribe topic successfully")
 	workers := make(chan struct{}, consumerConcurrency())
-	workerGroup := safe.WaitGroup("queue_message_workers")
+	workerGroup := xutil.WaitGroup("queue_message_workers")
 
 listenLoop:
 	for {

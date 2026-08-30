@@ -7,7 +7,7 @@ import (
 	"time"
 
 	projectredis "github.com/caitunai/go-blueprint/redis"
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 func TestPutStringRejectsInvalidInputs(t *testing.T) {
@@ -42,7 +42,7 @@ func TestConcurrentInitializationReturnsOneClient(t *testing.T) {
 
 	const goroutines = 50
 	clients := make(chan any, goroutines)
-	group := safe.WaitGroup("cache_initialization_test")
+	group := xutil.WaitGroup("cache_initialization_test")
 	for range goroutines {
 		group.Go(t.Context(), func(context.Context) {
 			clients <- GetClient()

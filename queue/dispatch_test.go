@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/caitunai/go-blueprint/queue/job"
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 var errTestJob = errors.New("test job failed")
@@ -80,7 +80,7 @@ func TestDispatchExhaustsBoundedRetries(t *testing.T) {
 func TestRunMessageWorkerRecoversAndNacks(t *testing.T) {
 	msg := message.NewMessage("panic-message", []byte("{}"))
 	msg.Metadata.Set("name", "panic-test")
-	group := safe.WaitGroup("queue_message_worker_test")
+	group := xutil.WaitGroup("queue_message_worker_test")
 	group.Go(t.Context(), func(context.Context) {
 		runMessageWorker("default", msg, func() {
 			panic("test panic")

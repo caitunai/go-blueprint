@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 func TestHTTPTimeoutsDefaultToUnlimited(t *testing.T) {
@@ -25,7 +25,7 @@ func TestHTTPTimeoutsDefaultToUnlimited(t *testing.T) {
 
 func TestServerTaskRecoversPanic(t *testing.T) {
 	panicEvents := make(chan error, 1)
-	unsubscribe := safe.OnPanic(httpServerTaskName, func(_ context.Context, _ string, err error) {
+	unsubscribe := xutil.OnPanic(httpServerTaskName, func(_ context.Context, _ string, err error) {
 		panicEvents <- err
 	})
 	t.Cleanup(unsubscribe)
@@ -36,8 +36,8 @@ func TestServerTaskRecoversPanic(t *testing.T) {
 
 	select {
 	case err := <-panicEvents:
-		if !errors.Is(err, safe.ErrPanic) {
-			t.Fatalf("server task error = %v, want safe.ErrPanic", err)
+		if !errors.Is(err, xutil.ErrPanic) {
+			t.Fatalf("server task error = %v, want xutil.ErrPanic", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for server panic recovery")

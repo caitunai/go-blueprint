@@ -10,7 +10,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 
-	"github.com/caitunai/go-blueprint/safe"
+	"github.com/caitunai/go-blueprint/xutil"
 )
 
 //nolint:cyclop,funlen,gocognit // This end-to-end test keeps one setup and assertion lifecycle visible.
@@ -57,7 +57,7 @@ func TestRedisOperationsIntegration(t *testing.T) {
 
 	const goroutines = 16
 	const increments = 50
-	group := safe.WaitGroup("redis_increment_test")
+	group := xutil.WaitGroup("redis_increment_test")
 	errorsChannel := make(chan error, goroutines)
 	for range goroutines {
 		group.Go(ctx, func(taskContext context.Context) {

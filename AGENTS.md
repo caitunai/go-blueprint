@@ -170,23 +170,23 @@ Application and feature packages must not import `github.com/redis/go-redis/v9`,
 
 ### Safe goroutine lifecycle
 
-- New or modified application code must use the project `/safe` package to start goroutines. Do not use a raw `go` statement, `sync.WaitGroup.Go`, or `errgroup.Group.Go` directly when `safe.Go`, `safe.WaitGroup`, or `safe.ErrGroup` provides the required lifecycle. A low-level concurrency primitive may bypass `/safe` only when implementing a focused concurrency abstraction and the reason is documented and tested.
+- New or modified application code must use the project `/xutil` package to start goroutines. Do not use a raw `go` statement, `sync.WaitGroup.Go`, or `errgroup.Group.Go` directly when `xutil.Go`, `xutil.WaitGroup`, or `xutil.ErrGroup` provides the required lifecycle. A low-level concurrency primitive may bypass these `/xutil` wrappers only when implementing a focused concurrency abstraction and the reason is documented and tested.
 - Give every task group a stable, low-cardinality name that identifies the component and operation, such as `audio_cleanup` or `queue_shutdown`. The name is used in panic logs and subscriber routing. Never include request IDs, user IDs, payloads, credentials, tokens, or other sensitive or unbounded values in a task name.
-- Use `safe.Go(ctx, name, task)` only for a truly independent task whose completion and returned error are not required by the caller. The task must still have an explicit owner, bounded lifetime, cancellation source, and shutdown behavior. Do not use it to make an HTTP request appear successful before an authoritative write, queue publication, notification, or other required side effect completes. Durable or retryable work belongs in `/queue`, not in an untracked goroutine.
-- Use `safe.WaitGroup(name)` when the caller must wait for several tasks that cannot return meaningful errors. Pass the appropriate context to every `Go` call and always call `Wait` before the owner returns or releases resources used by the tasks:
+- Use `xutil.Go(ctx, name, task)` only for a truly independent task whose completion and returned error are not required by the caller. The task must still have an explicit owner, bounded lifetime, cancellation source, and shutdown behavior. Do not use it to make an HTTP request appear successful before an authoritative write, queue publication, notification, or other required side effect completes. Durable or retryable work belongs in `/queue`, not in an untracked goroutine.
+- Use `xutil.WaitGroup(name)` when the caller must wait for several tasks that cannot return meaningful errors. Pass the appropriate context to every `Go` call and always call `Wait` before the owner returns or releases resources used by the tasks:
 
 ```go
-group := safe.WaitGroup("cache_refresh")
+group := xutil.WaitGroup("cache_refresh")
 group.
 	Go(ctx, refreshPrimary).
 	Go(ctx, refreshSecondary)
 group.Wait()
 ```
 
-- Use `safe.ErrGroup(ctx, name)` when any task can fail or when the tasks should share fail-fast cancellation. The constructor owns one derived context for the complete group; do not pass a context to each `Go` call. Every task must use the context it receives. Always inspect the error returned by `Wait` with `errors.Is` or `errors.As` as appropriate:
+- Use `xutil.ErrGroup(ctx, name)` when any task can fail or when the tasks should share fail-fast cancellation. The constructor owns one derived context for the complete group; do not pass a context to each `Go` call. Every task must use the context it receives. Always inspect the error returned by `Wait` with `errors.Is` or `errors.As` as appropriate:
 
 ```go
-group := safe.ErrGroup(ctx, "profile_load").Limit(4)
+group := xutil.ErrGroup(ctx, "profile_load").Limit(4)
 group.
 	Go(loadAccount).
 	Go(loadPermissions)
@@ -196,10 +196,10 @@ if err := group.Wait(); err != nil {
 ```
 
 - Apply a positive `Limit` before the first `ErrorGroup.Go` call whenever input size or task count can vary. Choose the limit from downstream connection-pool capacity, rate limits, memory cost, and measured load; do not derive it directly from untrusted input. Never call `Limit` while tasks are active, and do not use zero because it prevents tasks from starting.
-- A panic inside any `/safe` task is recovered and logged with the task name and stack. In `safe.ErrGroup`, the panic is converted to an error classifiable with `errors.Is(err, safe.ErrPanic)` and cancels the shared group context. Recovery prevents a process-wide crash; it does not make partially completed business work successful. Design writes to remain transactional or idempotent, and handle the returned error at the group owner.
-- Register `safe.OnPanic(name, handler)` for metrics, alerting, or another short best-effort reaction. Use `safe.All` only for process-wide observability initialized by the root command. Subscribers run synchronously on the recovering goroutine, so they must not block, perform unbounded I/O, acquire contested locks, retry work, or become a correctness boundary. Keep the returned unsubscribe function and invoke it during test or component cleanup. Subscriber panics are isolated and logged, but subscribers must still be independently tested.
-- Do not add a second generic `recover` wrapper around `/safe` tasks. Keep local `defer` cleanup inside the task for resources it owns; those defers run during stack unwinding before `/safe` records the panic. Code that intentionally converts a domain-specific panic into a classified error may recover at that narrow boundary, but ordinary business logic should return errors instead of panicking.
-- Tests for concurrent code must cover successful completion, caller cancellation, the first returned error, panic conversion, sibling cancellation for `safe.ErrGroup`, bounded concurrency where `Limit` is used, and shutdown without goroutine leaks. Run the relevant tests with `-race`.
+- A panic inside any protected `/xutil` task is recovered and logged with the task name and stack. In `xutil.ErrGroup`, the panic is converted to an error classifiable with `errors.Is(err, xutil.ErrPanic)` and cancels the shared group context. Recovery prevents a process-wide crash; it does not make partially completed business work successful. Design writes to remain transactional or idempotent, and handle the returned error at the group owner.
+- Register `xutil.OnPanic(name, handler)` for metrics, alerting, or another short best-effort reaction. Use `xutil.All` only for process-wide observability initialized by the root command. Subscribers run synchronously on the recovering goroutine, so they must not block, perform unbounded I/O, acquire contested locks, retry work, or become a correctness boundary. Keep the returned unsubscribe function and invoke it during test or component cleanup. Subscriber panics are isolated and logged, but subscribers must still be independently tested.
+- Do not add a second generic `recover` wrapper around protected `/xutil` tasks. Keep local `defer` cleanup inside the task for resources it owns; those defers run during stack unwinding before `/xutil` records the panic. Code that intentionally converts a domain-specific panic into a classified error may recover at that narrow boundary, but ordinary business logic should return errors instead of panicking.
+- Tests for concurrent code must cover successful completion, caller cancellation, the first returned error, panic conversion, sibling cancellation for `xutil.ErrGroup`, bounded concurrency where `Limit` is used, and shutdown without goroutine leaks. Run the relevant tests with `-race`.
 
 ## Verification and completion criteria
 
@@ -261,9 +261,8 @@ r.GET("/", handler.HomePage)
 - /queue/job : This directory is used to store all programs related to queue jobs. For the Job interface specification, please refer to the description in `/queue/job/job.go` .
 - /queue : This directory owns Watermill Publisher and Subscriber lifecycle, bounded retry, acknowledgement, DLQ routing, stream retention, consumer claims, and shutdown behavior. Application code publishes through `queue.Publish(ctx, job)` and must not construct Watermill Redis Stream clients directly.
 - /redis : This directory contains reusable wrappers for specialized Redis data structures and atomic operations. Wrappers receive logical unprefixed keys and apply the configured prefix internally. Feature packages must not directly import or call `github.com/redis/go-redis/v9`, use `GetClient` to assemble command sequences, or pre-prefix wrapper keys; add a focused, validated operation in `/redis` instead. Use `/cache` first for ordinary source-backed caching.
-- /safe : This directory owns the project's goroutine startup, panic recovery, structured panic logging, named panic subscriptions, wait-group lifecycle, and error-group cancellation. Application code should use `safe.Go`, `safe.WaitGroup`, or `safe.ErrGroup` according to the ownership and error semantics described above instead of starting unmanaged goroutines.
 - /services : This directory is used to store programs that call functionalities of third-party or external systems. Programs that can exist relatively independently can also be placed in this folder.
-- /xutil : This folder is used to store custom utility functions. Independent and reusable utility functions can be placed here. This folder already includes encryption and decryption functions as well as some common string processing functions.
+- /xutil : This folder contains reusable wrappers around Go standard-library functionality, including encryption, string processing, protected goroutine startup, panic recovery and subscriptions, wait-group lifecycle, and error-group cancellation. Application code should use `xutil.Go`, `xutil.WaitGroup`, or `xutil.ErrGroup` according to the ownership and error semantics described above instead of starting unmanaged goroutines.
 - /storage/static : This directory is used to store static asset files, which can include HTML, JavaScript, CSS, images, etc. These files will be bundled into the Golang binary during the compilation process.
 - /storage/views : This directory is used to store HTML files that will be rendered by Golang. HTML files can be categorized into subfolders based on their functionality. Place basic layout files in the `/storage/views/layout` directory, shared components in the `/storage/views/shared` directory, and other specific pages can be categorized according to their functional modules. To automatically reference the layout, page files need to follow the naming convention. The convention is as follows: If the base layout file is named `mylayout.html`, the functional page file should be named `feature.mylayout.html`, i.e., `featureName` + `layoutFileName`.
 - /storage/ui : This directory is used to store programs related to front-end frameworks, such as independent programs for Vue, React, and other front-end projects.

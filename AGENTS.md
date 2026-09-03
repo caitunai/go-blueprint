@@ -35,6 +35,67 @@ Always use the latest stable version of Go (1.26 or 1.27 or newer) and be famili
 
 Always prioritize security, scalability, and maintainability in your API designs and implementations. Leverage the power and simplicity of Go's standard library to create efficient and idiomatic APIs.
 
+# Golangci-lint code quality requirements
+
+Treat `/.golangci.yaml` as the executable source of truth. These requirements explain the intended engineering behavior behind the enabled linters; they do not replace the configuration. Run `golangci-lint run ./...` against the entire repository after every Go change. Fix the design that caused an issue instead of weakening a threshold, adding a broad exclusion, or hiding it with an unexplained `//nolint` directive. Any unavoidable suppression must name the specific linter and explain the concrete compatibility or correctness constraint.
+
+## Program complexity
+
+The complexity linters are complementary. Passing one does not excuse a failure from another:
+
+- `cyclop` limits cyclomatic complexity to the configured default maximum of 10 per function. Keep independent branches and decision paths bounded; extract cohesive operations or replace repeated branching with data-driven logic.
+- `gocognit` reports cognitive complexity at 10 or above. Prefer guard clauses, early returns, focused helpers, and shallow control flow. Do not move the same nested logic into an anonymous closure merely to lower the enclosing function's score.
+- `funlen` uses its defaults of 60 lines and 40 statements, ignoring comment-only lines. Split functions by responsibility and preserve one clear owner for transactions, cleanup, error classification, and resource lifetime.
+- `nestif` reports nested-if complexity at its default threshold of 5. Flatten nested conditionals with validation guards and explicit terminal cases without changing required ordering or failure behavior.
+- `maintidx` reports functions whose maintainability index is below its default threshold of 20. Improve naming, cohesion, duplication, control flow, and function size together; do not optimize only one metric.
+- Complexity refactoring must preserve authorization, transaction boundaries, lock ordering, error identity, cleanup order, and side-effect ordering. Small helpers must represent meaningful units of behavior rather than fragmenting code solely to satisfy a score.
+
+## Package names and exported-name stuttering
+
+- Follow the `revive` naming rules and choose short, lowercase, singular package names that communicate one responsibility.
+- Do not repeat the package name in an exported identifier when the qualified name would stutter. In package `user`, prefer `user.Service`, `user.Repository`, or `user.New` over `user.UserService`, `user.UserRepository`, or `user.NewUser` when the shorter name remains clear.
+- Preserve conventional initialisms such as `ID`, `HTTP`, `URL`, and `API`. Do not use an import alias merely to conceal a stuttering or confusing package API.
+- A repeated word is acceptable only when removing it would make the public API ambiguous or would break required compatibility. Document that constraint rather than renaming mechanically.
+
+## Interface width
+
+- `interfacebloat` allows at most 5 methods per interface in this repository, stricter than its upstream default of 10.
+- Define interfaces at the consumer boundary and include only the behavior that consumer needs. Prefer multiple cohesive capability interfaces and compose them where a caller genuinely needs the combined contract.
+- Do not add a method to a broad shared interface merely for one implementation. Do not create a large provider-side interface in advance of a real consumer, and do not split an atomic contract into artificial interfaces that weaken correctness.
+- Prefer accepting the smallest useful interface and returning a concrete type unless an existing public contract requires otherwise. Keep mocks and test doubles aligned with the same narrow production contract.
+
+## Error definition, wrapping, and matching
+
+- `err113`, `errname`, `errorlint`, and `wrapcheck` jointly enforce stable error identity and correct propagation. Sentinel errors must be package-level values named with an `Err` prefix; custom error types must end in `Error`.
+- Return a sentinel directly when there is no underlying cause. When a dependency or lower layer supplies the cause, classify it with `errors.Join(ErrOperation, err)` so callers can match both the package-level operation and the original cause. Do not return an external-package error unchanged from a package boundary.
+- Do not construct returned errors with `fmt.Errorf`, build dynamic `errors.New` values at call sites, compare errors with `==`, or compare `err.Error()` strings. Use `errors.Is` for sentinel errors and wrapped causes.
+- On Go 1.26 and newer, use `errors.AsType[T](err)` when matching a concrete error type. Include pointer-ness in `T`, for example:
+
+```go
+if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+	handle(pathErr)
+}
+```
+
+- Do not introduce the legacy temporary-target form `var target *T; errors.As(err, &target)` in new or modified code. Use it only when required by code that must compile against a Go version older than 1.26, which this repository does not currently support.
+- Add operation context through a classifiable sentinel rather than replacing the underlying cause with log text. Log an error at the layer that owns the failed operation, and avoid repeatedly logging the same propagated error at every layer.
+
+## Struct field layout
+
+- `fieldalignment` is enabled through `govet.enable-all`. Order fields to minimize padding and, where reported, reduce the pointer-scanned portion of frequently allocated structs. This is especially important for request state, cache entries, queue metadata, and other types with high instance counts or concurrency.
+- Follow the analyzer's type-aware recommendation instead of relying only on visual size ordering; alignment, embedded fields, arrays, architecture, and pointer scanning all affect the result. Re-run the full lint suite after changing a struct.
+- Before reordering fields, check whether declaration order is externally observable through positional composite literals, reflection, generated code, binary or C layout, unsafe operations, database mapping, or serialized field order. Prefer keyed literals and separate wire/storage DTOs from memory-optimized runtime structs.
+- If compatibility makes reordering unsafe, preserve behavior and use only a narrow `//nolint:govet` with a concrete explanation of the layout contract. Do not disable `govet` or `fieldalignment` repository-wide.
+
+## Modern Go requirements
+
+- The `modernize` linter runs with all of its analyzers enabled, and `exptostd`, `intrange`, `copyloopvar`, `usestdlibvars`, `usetesting`, `perfsprint`, and `mirror` provide additional modernization checks. Apply their supported fixes when they preserve behavior.
+- Before editing Go, run the Modern Go Guidelines skill as required above. Its Go-version-specific output is authoritative even when nearby code uses an older idiom.
+- In addition to `errors.AsType`, prefer current standard-library forms such as integer ranges, iterator-based `maps`/`slices` helpers, typed atomics, `min`/`max`, `clear`, `strings.Cut` variants, `errors.Join`, `testing.T.Context`, and `testing.B.Loop` when the target Go version supports them and the pattern applies.
+- Use `sync.WaitGroup.Go` inside a focused low-level concurrency abstraction, but application code in this repository must continue to start managed goroutines through `xutil.Go`, `xutil.WaitGroup`, or `xutil.ErrGroup` so panic recovery, naming, logging, cancellation, and ownership are preserved.
+- For Go 1.27 and newer, use `encoding/json/v2` for new JSON code and `omitzero` for zero-valued numeric, boolean, struct, and time fields that should be omitted. Do not migrate established serialization behavior without explicit compatibility review and tests.
+- Do not accept an automatic modernization that changes public APIs, serialized output, error identity, goroutine ownership, cancellation, ordering, or other required behavior. Apply the modern form manually or retain the existing form with a documented reason when compatibility requires it.
+
 # Performance Optimization Methodology
 
 Performance work must optimize the complete request and background-processing lifecycle, not merely the execution time of an individual SQL statement or Redis command. Reduce synchronous steps, network round trips, transaction duration, lock hold time, duplicated work, and unbounded background work while preserving business correctness.

@@ -4,8 +4,10 @@ package db
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -52,11 +54,15 @@ func Conn() *gorm.DB {
 	if prefix != "" && !strings.HasSuffix(prefix, "_") {
 		prefix += "_"
 	}
-	dsn = fmt.Sprintf(dsn, user, pass, host, port, dbname)
+	// loc controls driver timestamps; time_zone sets every MySQL connection's session timezone.
+	dsn = fmt.Sprintf(dsn, user, pass, host, port, dbname) + "&time_zone=" + url.QueryEscape("'+00:00'")
 	var err error
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   NewLogger(),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
 		NamingStrategy: schema.NamingStrategy{
 			TablePrefix: prefix,
 		},
